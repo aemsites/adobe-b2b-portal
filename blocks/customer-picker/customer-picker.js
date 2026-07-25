@@ -59,6 +59,7 @@ const EVENT_MODES = [
   { id: 'london', label: 'Summit London 2026', column: 'Summit London 2026' },
   { id: 'munich', label: 'Munich Summit 2026', column: 'Munich Summit 2026' },
   { id: 'singapore', label: 'Summit Singapore 2026', column: 'Summit Singapore 2026' },
+  { id: 'mumbai', label: 'Summit Mumbai 2026', column: 'Summit Mumbai 2026' },
 ];
 
 const EVENT_MODE_IDS = new Set(EVENT_MODES.map((e) => e.id));
