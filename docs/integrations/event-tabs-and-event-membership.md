@@ -131,6 +131,17 @@ The existing data uses two styles, and the portal handles both identically:
 **Prefer sparse.** It is smaller, and a reader that only sets member rows cannot
 accidentally clear another event's cell. Do not feel obliged to backfill `""`.
 
+> **You will not see every event column at the top of the sheet — this is normal.**
+> The DA sheet header and the first rows of the JSON only show the columns present on
+> the early (non-member) rows. A sparse column such as `Summit Mumbai 2026` therefore
+> appears only once you scroll to one of its member rows. It is not missing, and the
+> tab still works: the portal scans *every* row for the column named in
+> `event-tabs.json`, so a row without the key simply counts as a non-member.
+> Do **not** "repair" this by hand-backfilling `""` across the file — that races the
+> whole-file `POST` (see §4) against your own pipeline. If you want every event column
+> present on every row, make the **generating pipeline** write them densely; don't
+> patch the data after the fact.
+
 > Consequence worth knowing: because rows carry different key sets, **column order
 > cannot be reliably recovered from this file.** That is precisely why tab order
 > lives in `event-tabs.json` and not here.
