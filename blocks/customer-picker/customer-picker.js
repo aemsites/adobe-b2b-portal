@@ -45,24 +45,93 @@ const EVENT_FORMATS = {
 };
 
 /**
- * Event portal tabs. Each event is one extra mode in the picker, backed by one
- * column in `insights-list.json`: a row whose `<column>` cell is non-empty is in
- * that event, and the cell value is the card label (the event-specific company
- * name, which can differ per event). Add an event = add one row here + populate
- * the matching column in DA. Unlike the Insight Reports tab (one card per website
- * globally), event tabs build ONE CARD PER FLAGGED ROW so the same company can
- * appear in several events and two companies sharing a page each keep their card.
+ * Event portal tabs are CONTENT, not code. Each event is one extra mode in the
+ * picker, backed by one column in `insights-list.json`: a row whose `<column>`
+ * cell is non-empty is in that event, and the cell value is the card label (the
+ * event-specific company name, which can differ per event). Which columns become
+ * tabs — and in what order, under what label — is authored in the DA sheet
+ * `/data/event-tabs.json`, so **adding an event needs no code change**: add a
+ * sheet row + populate the matching column in `insights-list`.
+ *
+ * Unlike the Insight Reports tab (one card per website globally), event tabs
+ * build ONE CARD PER FLAGGED ROW so the same company can appear in several
+ * events and two companies sharing a page each keep their card.
  */
-const EVENT_MODES = [
-  { id: 'cannes', label: 'Cannes 2026 Portal', column: 'Cannes 2026' },
-  { id: 'sydney', label: 'Sydney Summit 2026', column: 'Sydney Summit 2026' },
-  { id: 'london', label: 'Summit London 2026', column: 'Summit London 2026' },
-  { id: 'munich', label: 'Munich Summit 2026', column: 'Munich Summit 2026' },
-  { id: 'singapore', label: 'Summit Singapore 2026', column: 'Summit Singapore 2026' },
-  { id: 'mumbai', label: 'Summit Mumbai 2026', column: 'Summit Mumbai 2026' },
-];
 
-const EVENT_MODE_IDS = new Set(EVENT_MODES.map((e) => e.id));
+/** Non-event columns in `insights-list`. Every OTHER column is an event flag —
+ *  this is what the no-config fallback keys off. */
+const INSIGHTS_DATA_COLUMNS = new Set(['Report', 'Customers', 'Folder', 'Created', 'Report Notice']);
+
+/** Built-in picker modes. An event row may never claim one of these ids. */
+const BUILTIN_MODE_IDS = new Set(['accounts', 'insights', 'portal']);
+
+/** Ids of the event modes resolved at init — drives `isReportMode` (dialog
+ *  layout) for whatever tabs the sheet happens to define this session. */
+const EVENT_MODE_IDS = new Set();
+
+/** Slugify a sheet value into a mode id (`Summit Mumbai 2026` → `summit-mumbai-2026`). */
+export function slugifyModeId(value) {
+  return String(value == null ? '' : value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** An `Active` cell is opt-OUT: only an explicit falsy word hides the tab, so a
+ *  freshly added row with the column left blank still shows. */
+function isActiveCell(value) {
+  const v = String(value == null ? '' : value).trim().toLowerCase();
+  return !['false', 'no', '0', 'off', 'n'].includes(v);
+}
+
+/**
+ * Fallback when `/data/event-tabs.json` is missing or defines no usable rows:
+ * derive one tab per non-reserved `insights-list` column that has at least one
+ * non-empty cell, labelled by the column header. Keeps the picker working
+ * (rather than losing every event tab) if the sheet is unpublished or broken —
+ * order is whatever key order the JSON carries, which is exactly the control the
+ * config sheet exists to provide.
+ */
+export function deriveEventModes(insightRows) {
+  const columns = [];
+  const seen = new Set();
+  for (const row of insightRows || []) {
+    for (const key of Object.keys(row)) {
+      if (!INSIGHTS_DATA_COLUMNS.has(key) && !seen.has(key) && String(row[key] || '').trim()) {
+        seen.add(key);
+        columns.push(key);
+      }
+    }
+  }
+  return columns
+    .map((column) => ({ id: slugifyModeId(column), label: column, column }))
+    .filter((m) => m.id && !BUILTIN_MODE_IDS.has(m.id));
+}
+
+/**
+ * Resolve the event tabs from the `/data/event-tabs.json` rows. Columns:
+ *   - `Column`  (required) the `insights-list` column this tab reads
+ *   - `Label`   tab text; defaults to `Column`
+ *   - `Active`  set `false` to retire a finished event without deleting its data
+ *   - `Id`      optional stable mode id (localStorage recents key, `cp-recent-<id>`);
+ *               defaults to a slug of `Column`. Pin it to keep recents across a rename.
+ * Row order is tab order. Rows with no `Column`, a duplicate/built-in id, or
+ * `Active: false` are dropped. If nothing usable survives, fall back to
+ * `deriveEventModes` so the tabs never silently disappear.
+ */
+export function parseEventModes(configRows, insightRows) {
+  const modes = [];
+  const seen = new Set();
+  for (const row of Array.isArray(configRows) ? configRows : []) {
+    const column = String(row.Column || '').trim();
+    const id = slugifyModeId(row.Id || column);
+    if (column && id && isActiveCell(row.Active) && !BUILTIN_MODE_IDS.has(id) && !seen.has(id)) {
+      seen.add(id);
+      modes.push({ id, label: String(row.Label || '').trim() || column, column });
+    }
+  }
+  return modes.length ? modes : deriveEventModes(insightRows);
+}
 
 /**
  * Per-report data notices. A report's `Report Notice` cell (in insights-list)
@@ -227,7 +296,7 @@ export function buildEventCompanies(rows, column) {
   return cards.sort((a, b) => a.Company.localeCompare(b.Company));
 }
 
-function buildModeToggle(onChange) {
+function buildModeToggle(onChange, eventModes) {
   const wrapper = document.createElement('div');
   wrapper.className = 'cp-mode-toggle';
 
@@ -235,7 +304,7 @@ function buildModeToggle(onChange) {
     { id: 'accounts', label: 'Accounts' },
     { id: 'insights', label: 'Insight Reports' },
     { id: 'portal', label: 'Summit 26 Portal' },
-    ...EVENT_MODES.map((e) => ({ id: e.id, label: e.label })),
+    ...eventModes.map((e) => ({ id: e.id, label: e.label })),
   ]) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -796,7 +865,6 @@ const SEARCH_PLACEHOLDERS = {
   insights: 'Search insight reports…',
   accounts: 'Search accounts…',
   portal: 'Search customers…',
-  ...Object.fromEntries(EVENT_MODES.map((e) => [e.id, `Search ${e.label}…`])),
 };
 
 export default async function init(el) {
@@ -807,13 +875,17 @@ export default async function init(el) {
   const insightsUrl = `${origin}/data/insights-list.json`;
   const accountsUrl = `${origin}/data/account-list.json`;
   const companyUrl = `${origin}/data/company-list.json`;
+  const eventTabsUrl = `${origin}/data/event-tabs.json`;
   const cugUrl = `${origin}/closed-user-groups.json`;
 
-  const [portalResp, insightsResp, accountsResp, companyResp, cugResp] = await Promise.all([
+  const [
+    portalResp, insightsResp, accountsResp, companyResp, eventTabsResp, cugResp,
+  ] = await Promise.all([
     fetch(link.href),
     fetch(insightsUrl),
     fetch(accountsUrl),
     fetch(companyUrl),
+    fetch(eventTabsUrl).catch(() => null),
     fetch(cugUrl),
   ]);
   if (!portalResp.ok) return;
@@ -823,10 +895,19 @@ export default async function init(el) {
   // Insight reports: one row per website×variant in the sheet → collapse to one
   // card per website, each carrying its available landing-page formats.
   const insightsCompanies = groupInsightsByWebsite(insightRows);
+  // Which event tabs exist is authored in /data/event-tabs.json — no code change
+  // per event. A missing/broken sheet falls back to deriving tabs from the
+  // insights-list columns, so the tabs never vanish. See parseEventModes.
+  const eventTabRows = eventTabsResp && eventTabsResp.ok
+    ? ((await eventTabsResp.json().catch(() => ({}))).data || [])
+    : [];
+  const eventModes = parseEventModes(eventTabRows, insightRows);
+  EVENT_MODE_IDS.clear();
+  eventModes.forEach((e) => EVENT_MODE_IDS.add(e.id));
   // Event portal tabs build directly from the flagged rows (one card per row),
-  // independent of the website grouping above — see EVENT_MODES / buildEventCompanies.
+  // independent of the website grouping above — see buildEventCompanies.
   const eventCompanies = Object.fromEntries(
-    EVENT_MODES.map((e) => [e.id, buildEventCompanies(insightRows, e.column)]),
+    eventModes.map((e) => [e.id, buildEventCompanies(insightRows, e.column)]),
   );
   const accountsCompanies = accountsResp.ok
     ? (await accountsResp.json()).data.map((r) => ({ ...r, Company: r.Account }))
@@ -880,7 +961,9 @@ export default async function init(el) {
     };
     const companies = companiesMap[mode] || [];
     searchInput.value = '';
-    searchInput.placeholder = SEARCH_PLACEHOLDERS[mode] || 'Search…';
+    const event = eventModes.find((e) => e.id === mode);
+    searchInput.placeholder = SEARCH_PLACEHOLDERS[mode]
+      || (event ? `Search ${event.label}…` : 'Search…');
 
     const { grid, groups } = buildGrid(companies, openDialog);
     const letterNav = buildLetterNav(groups);
@@ -891,7 +974,7 @@ export default async function init(el) {
     gridContainer.replaceChildren(grid);
   }
 
-  const modeToggle = buildModeToggle(renderMode);
+  const modeToggle = buildModeToggle(renderMode, eventModes);
   el.append(modeToggle, searchWrapper, navContainer, gridContainer);
   renderMode('accounts');
 

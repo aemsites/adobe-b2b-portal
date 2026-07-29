@@ -1,5 +1,12 @@
 import { expect } from '@esm-bundle/chai';
-import { parseInsightFolder, groupInsightsByWebsite, buildEventCompanies } from '../../blocks/customer-picker/customer-picker.js';
+import {
+  parseInsightFolder,
+  groupInsightsByWebsite,
+  buildEventCompanies,
+  parseEventModes,
+  deriveEventModes,
+  slugifyModeId,
+} from '../../blocks/customer-picker/customer-picker.js';
 
 describe('customer-picker › parseInsightFolder', () => {
   it('treats the segment after /insights/ as the website slug', () => {
@@ -224,5 +231,98 @@ describe('customer-picker › buildEventCompanies', () => {
     // EY's card links to the same page in both tabs.
     expect(cannes.find((c) => c.Company === 'EY').Folder)
       .to.equal(sydney.find((c) => c.Company === 'EY').Folder);
+  });
+});
+
+describe('customer-picker › slugifyModeId', () => {
+  it('slugifies an event column into a stable id', () => {
+    expect(slugifyModeId('Summit Mumbai 2026')).to.equal('summit-mumbai-2026');
+  });
+
+  it('collapses punctuation and trims stray separators', () => {
+    expect(slugifyModeId('  Cannes — 2026!  ')).to.equal('cannes-2026');
+  });
+
+  it('returns an empty string for empty/absent values', () => {
+    expect(slugifyModeId('')).to.equal('');
+    expect(slugifyModeId(undefined)).to.equal('');
+    expect(slugifyModeId(null)).to.equal('');
+  });
+});
+
+describe('customer-picker › parseEventModes', () => {
+  const CONFIG = [
+    { Id: 'cannes', Column: 'Cannes 2026', Label: 'Cannes 2026 Portal', Active: 'true' },
+    { Id: 'mumbai', Column: 'Summit Mumbai 2026', Label: 'Summit Mumbai 2026', Active: 'true' },
+  ];
+
+  it('maps sheet rows to modes, preserving row order as tab order', () => {
+    expect(parseEventModes(CONFIG, [])).to.deep.equal([
+      { id: 'cannes', label: 'Cannes 2026 Portal', column: 'Cannes 2026' },
+      { id: 'mumbai', label: 'Summit Mumbai 2026', column: 'Summit Mumbai 2026' },
+    ]);
+  });
+
+  it('defaults the label to the column and the id to a slug of the column', () => {
+    expect(parseEventModes([{ Column: 'Summit Mumbai 2026' }], [])).to.deep.equal([
+      { id: 'summit-mumbai-2026', label: 'Summit Mumbai 2026', column: 'Summit Mumbai 2026' },
+    ]);
+  });
+
+  it('treats Active as opt-out: only explicit falsy words retire a tab', () => {
+    const rows = [
+      { Id: 'a', Column: 'A' },
+      { Id: 'b', Column: 'B', Active: '' },
+      { Id: 'c', Column: 'C', Active: 'TRUE' },
+      { Id: 'd', Column: 'D', Active: 'false' },
+      { Id: 'e', Column: 'E', Active: 'No' },
+      { Id: 'f', Column: 'F', Active: '0' },
+    ];
+    expect(parseEventModes(rows, []).map((m) => m.id)).to.deep.equal(['a', 'b', 'c']);
+  });
+
+  it('drops rows with no Column, and duplicate or built-in ids', () => {
+    const rows = [
+      { Id: 'cannes', Column: 'Cannes 2026' },
+      { Id: '', Column: '', Label: 'Orphan' },
+      { Id: 'cannes', Column: 'Cannes Again' },
+      { Id: 'insights', Column: 'Collides With Built-in' },
+      { Id: 'accounts', Column: 'Also Collides' },
+    ];
+    expect(parseEventModes(rows, []).map((m) => m.id)).to.deep.equal(['cannes']);
+  });
+
+  it('falls back to deriving tabs from insight columns when the sheet is absent', () => {
+    const insightRows = [
+      { Report: 'ey.com', Customers: 'EY', Folder: '/f/', Created: '1.01.2026', 'Cannes 2026': 'EY' },
+      { Report: 'abb.com', Folder: '/g/', 'Report Notice': 'no-report', 'Summit London 2026': 'ABB' },
+    ];
+    const expected = [
+      { id: 'cannes-2026', label: 'Cannes 2026', column: 'Cannes 2026' },
+      { id: 'summit-london-2026', label: 'Summit London 2026', column: 'Summit London 2026' },
+    ];
+    // Missing sheet, empty sheet, and a sheet whose every row is unusable all fall back.
+    expect(parseEventModes([], insightRows)).to.deep.equal(expected);
+    expect(parseEventModes(undefined, insightRows)).to.deep.equal(expected);
+    expect(parseEventModes([{ Column: '' }], insightRows)).to.deep.equal(expected);
+  });
+});
+
+describe('customer-picker › deriveEventModes', () => {
+  it('ignores reserved data columns and columns with no values anywhere', () => {
+    const rows = [
+      { Report: 'ey.com', Customers: 'EY', Folder: '/f/', Created: '1.01.2026', 'Report Notice': 'no-report' },
+      { 'Cannes 2026': '', 'Summit London 2026': 'ABB' },
+      { 'Cannes 2026': 'EY' },
+    ];
+    expect(deriveEventModes(rows)).to.deep.equal([
+      { id: 'summit-london-2026', label: 'Summit London 2026', column: 'Summit London 2026' },
+      { id: 'cannes-2026', label: 'Cannes 2026', column: 'Cannes 2026' },
+    ]);
+  });
+
+  it('returns no modes for empty or absent rows', () => {
+    expect(deriveEventModes([])).to.deep.equal([]);
+    expect(deriveEventModes(undefined)).to.deep.equal([]);
   });
 });
