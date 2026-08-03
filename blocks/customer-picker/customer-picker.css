@@ -15,7 +15,7 @@
   border-radius: 12px;
   width: fit-content;
   max-width: 100%;
-  margin-bottom: var(--spacing-l);
+  margin-bottom: var(--spacing-m);
 }
 
 .cp-mode-btn {
@@ -39,6 +39,119 @@
 
 .cp-mode-btn:not(.cp-mode-btn--active):hover {
   color: var(--color-text);
+}
+
+/* Secondary nav: which slice of the reports. Deliberately lighter than the
+   primary pill control so the two levels read as a hierarchy, not as nine
+   equal choices. */
+.cp-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--spacing-s);
+}
+
+.cp-mode-chip {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font-family);
+  font-size: var(--body-font-size-s);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cp-mode-chip:hover:not(.cp-mode-chip--active) {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.cp-mode-chip--active {
+  background: light-dark(var(--color-purple-100), var(--color-purple-900));
+  color: var(--color-brand);
+}
+
+/* The hairline that separates "everything we have generated" from the event
+   pins — the whole point of the redesign, so it is structural, not copy. */
+.cp-mode-chip--all {
+  position: relative;
+  margin-right: var(--spacing-s);
+}
+
+.cp-mode-chip--all::after {
+  content: "";
+  position: absolute;
+  right: calc(var(--spacing-s) * -0.5);
+  top: 50%;
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  transform: translateY(-50%);
+}
+
+/* Context line: which slice, how big, and how to get back to everything. */
+.cp-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--spacing-s);
+  margin: 0 0 var(--spacing-s);
+  font-size: var(--body-font-size-s);
+  color: var(--color-text-muted);
+}
+
+.cp-context-action,
+.cp-empty-action {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--font-family);
+  font-size: var(--body-font-size-s);
+  font-weight: 600;
+  color: var(--color-brand);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cp-context-action:hover,
+.cp-empty-action:hover {
+  text-decoration: none;
+}
+
+/* Empty state: without this a fruitless search just blanks the grid, and "not
+   at this event" looks identical to "no report at all". */
+.cp-empty {
+  padding: var(--spacing-xl) 0;
+  text-align: center;
+}
+
+.cp-empty-text {
+  margin: 0 0 var(--spacing-s);
+  font-size: var(--body-font-size-m);
+  color: var(--color-text-muted);
+}
+
+@media (width < 1000px) {
+  .cp-subnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .cp-subnav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cp-mode-chip {
+    flex: 0 0 auto;
+  }
 }
 
 /* Search */

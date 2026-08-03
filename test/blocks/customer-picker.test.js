@@ -6,7 +6,16 @@ import {
   parseEventModes,
   deriveEventModes,
   slugifyModeId,
+  buildNavModel,
+  findFamily,
+  findMode,
+  resolveTabParam,
+  contextCopy,
+  emptyStateCopy,
+  buildNav,
+  applyFilter,
 } from '../../blocks/customer-picker/customer-picker.js';
+import { buildShareForm, buildShareSection, folderToDeepLink } from '../../blocks/customer-picker/share-form.js';
 
 describe('customer-picker › parseInsightFolder', () => {
   it('treats the segment after /insights/ as the website slug', () => {
@@ -324,5 +333,300 @@ describe('customer-picker › deriveEventModes', () => {
   it('returns no modes for empty or absent rows', () => {
     expect(deriveEventModes([])).to.deep.equal([]);
     expect(deriveEventModes(undefined)).to.deep.equal([]);
+  });
+});
+
+describe('customer-picker › share-form', () => {
+  it('strips the origin but keeps the trailing slash', () => {
+    expect(folderToDeepLink('https://act.aem.now/customers/a/acme/')).to.equal('/customers/a/acme/');
+  });
+
+  it('passes a non-URL folder through untouched', () => {
+    expect(folderToDeepLink('/customers/a/acme/')).to.equal('/customers/a/acme/');
+  });
+
+  it('builds an email field, a send button and a copy button', () => {
+    const form = buildShareForm('/customers/a/acme/');
+    expect(form.querySelector('.cp-share-input')).to.exist;
+    expect(form.querySelector('.cp-share-send')).to.exist;
+    expect(form.querySelector('.cp-share-copy')).to.exist;
+  });
+
+  it('returns null when the company has no folder', () => {
+    expect(buildShareSection({ Company: 'Acme' })).to.equal(null);
+  });
+});
+
+const EVENT_MODES = [
+  { id: 'cannes', label: 'Cannes 2026 Portal', column: 'Cannes 2026' },
+  { id: 'munich', label: 'Munich Summit 2026', column: 'Munich Summit 2026' },
+];
+
+describe('customer-picker › buildNavModel', () => {
+  it('splits the modes into exactly two families', () => {
+    const model = buildNavModel(EVENT_MODES);
+    expect(model.map((f) => f.id)).to.deep.equal(['reports', 'accounts']);
+    expect(model[0].label).to.equal('Digital Opportunity Reports');
+    expect(model[1].label).to.equal('Accounts');
+  });
+
+  it('leads the reports family with All reports, then Adobe Summit 2026, then the sheet rows in order', () => {
+    const [reports] = buildNavModel(EVENT_MODES);
+    expect(reports.modes.map((m) => m.id)).to.deep.equal(['insights', 'portal', 'cannes', 'munich']);
+    expect(reports.modes.map((m) => m.label)).to.deep.equal([
+      'All reports', 'Adobe Summit 2026', 'Cannes 2026 Portal', 'Munich Summit 2026',
+    ]);
+  });
+
+  it('marks only All reports as the "all" kind — everything else is an event', () => {
+    const [reports] = buildNavModel(EVENT_MODES);
+    expect(reports.modes.map((m) => m.kind)).to.deep.equal(['all', 'event', 'event', 'event']);
+  });
+
+  it('gives the accounts family a single mode', () => {
+    const [, accounts] = buildNavModel(EVENT_MODES);
+    expect(accounts.modes.map((m) => m.id)).to.deep.equal(['accounts']);
+  });
+
+  it('still renders All reports and Adobe Summit 2026 when the sheet yields no events', () => {
+    const [reports] = buildNavModel([]);
+    expect(reports.modes.map((m) => m.id)).to.deep.equal(['insights', 'portal']);
+  });
+
+  it('never invents or rewrites a mode id — every event id survives verbatim', () => {
+    const [reports] = buildNavModel([{ id: 'summit-tokyo-2027', label: 'Tokyo', column: 'Summit Tokyo 2027' }]);
+    expect(reports.modes.map((m) => m.id)).to.include('summit-tokyo-2027');
+  });
+});
+
+describe('customer-picker › findFamily / findMode', () => {
+  it('finds the family that owns a mode', () => {
+    const model = buildNavModel(EVENT_MODES);
+    expect(findFamily(model, 'munich').id).to.equal('reports');
+    expect(findFamily(model, 'accounts').id).to.equal('accounts');
+  });
+
+  it('returns undefined for an unknown mode', () => {
+    expect(findFamily(buildNavModel(EVENT_MODES), 'nope')).to.equal(undefined);
+    expect(findMode(buildNavModel(EVENT_MODES), 'nope')).to.equal(undefined);
+  });
+
+  it('finds a mode by id', () => {
+    expect(findMode(buildNavModel(EVENT_MODES), 'cannes').label).to.equal('Cannes 2026 Portal');
+  });
+});
+
+describe('customer-picker › resolveTabParam', () => {
+  const model = buildNavModel(EVENT_MODES);
+
+  it('accepts a known mode id', () => {
+    expect(resolveTabParam(model, 'munich')).to.equal('munich');
+  });
+
+  it('accepts accounts', () => {
+    expect(resolveTabParam(model, 'accounts')).to.equal('accounts');
+  });
+
+  it('is case- and whitespace-insensitive', () => {
+    expect(resolveTabParam(model, '  MUNICH ')).to.equal('munich');
+  });
+
+  it('falls back to All reports for an unknown, empty or missing value', () => {
+    expect(resolveTabParam(model, 'retired-event')).to.equal('insights');
+    expect(resolveTabParam(model, '')).to.equal('insights');
+    expect(resolveTabParam(model, null)).to.equal('insights');
+    expect(resolveTabParam(model, undefined)).to.equal('insights');
+  });
+});
+
+const ALL_MODE = { id: 'insights', label: 'All reports', kind: 'all' };
+const EVENT_MODE = { id: 'munich', label: 'Munich Summit 2026', kind: 'event' };
+const ACCOUNTS_MODE = { id: 'accounts', label: 'Accounts', kind: 'all' };
+
+describe('customer-picker › contextCopy', () => {
+  it('describes All reports as everything we have generated, with a thousands-separated count', () => {
+    expect(contextCopy(ALL_MODE, 4035)).to.deep.equal({
+      text: 'Every Digital Opportunity Report we have generated — one card per website. 4,035 total.',
+      action: null,
+    });
+  });
+
+  it('describes an event as a pinned subset and always offers the way back to All reports', () => {
+    expect(contextCopy(EVENT_MODE, 405)).to.deep.equal({
+      text: 'The 405 reports pinned for Munich Summit 2026.',
+      action: 'Looking for someone else? Search all reports',
+    });
+  });
+
+  it('says nothing on the Accounts tab — another team owns that surface', () => {
+    expect(contextCopy(ACCOUNTS_MODE, 1844)).to.equal(null);
+  });
+
+  it('returns null for a missing mode', () => {
+    expect(contextCopy(null, 0)).to.equal(null);
+  });
+});
+
+describe('customer-picker › emptyStateCopy', () => {
+  it('offers the whole catalogue when an event search finds nothing', () => {
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 4035)).to.deep.equal({
+      text: 'No match for “acme” in Munich Summit 2026.',
+      action: 'Search all 4,035 reports',
+    });
+  });
+
+  it('has no escape hatch on All reports — there is nowhere wider to go', () => {
+    expect(emptyStateCopy(ALL_MODE, 'acme', 4035)).to.deep.equal({
+      text: 'No match for “acme”.',
+      action: null,
+    });
+  });
+
+  it('has no escape hatch on Accounts', () => {
+    expect(emptyStateCopy(ACCOUNTS_MODE, 'acme', 4035).action).to.equal(null);
+  });
+
+  it('trims the echoed query', () => {
+    expect(emptyStateCopy(ALL_MODE, '  acme  ', 10).text).to.equal('No match for “acme”.');
+  });
+});
+
+describe('customer-picker › buildNav', () => {
+  const model = () => buildNavModel(EVENT_MODES);
+
+  it('renders exactly two primary tabs', () => {
+    const { el } = buildNav(model(), () => {});
+    const labels = [...el.querySelectorAll('.cp-family-btn')].map((b) => b.textContent);
+    expect(labels).to.deep.equal(['Digital Opportunity Reports', 'Accounts']);
+  });
+
+  it('renders one chip per reports mode, in model order', () => {
+    const { el } = buildNav(model(), () => {});
+    const chips = [...el.querySelectorAll('.cp-mode-chip')];
+    expect(chips.map((c) => c.dataset.mode)).to.deep.equal(['insights', 'portal', 'cannes', 'munich']);
+  });
+
+  it('marks the All-reports chip so the divider can hang off it', () => {
+    const { el } = buildNav(model(), () => {});
+    expect(el.querySelector('.cp-mode-chip[data-mode="insights"]').classList.contains('cp-mode-chip--all')).to.equal(true);
+    expect(el.querySelector('.cp-mode-chip[data-mode="munich"]').classList.contains('cp-mode-chip--all')).to.equal(false);
+  });
+
+  it('activates the family and chip for the current mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('munich', 405);
+    expect(el.querySelector('.cp-family-btn--active').dataset.family).to.equal('reports');
+    expect(el.querySelector('.cp-mode-chip--active').dataset.mode).to.equal('munich');
+  });
+
+  it('hides the chip row on Accounts and shows it again on a report mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    const chipRow = el.querySelector('.cp-subnav');
+    setActive('accounts', 1844);
+    expect(chipRow.hidden).to.equal(true);
+    setActive('insights', 4035);
+    expect(chipRow.hidden).to.equal(false);
+  });
+
+  it('writes the context line for the active mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('munich', 405);
+    expect(el.querySelector('.cp-context-text').textContent).to.equal('The 405 reports pinned for Munich Summit 2026.');
+    expect(el.querySelector('.cp-context-action').textContent).to.equal('Looking for someone else? Search all reports');
+  });
+
+  it('drops the context action on All reports and hides the line on Accounts', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('insights', 4035);
+    expect(el.querySelector('.cp-context-action')).to.equal(null);
+    setActive('accounts', 1844);
+    expect(el.querySelector('.cp-context').hidden).to.equal(true);
+  });
+
+  it('reports a chip click without asking to keep the query', () => {
+    const seen = [];
+    const { el } = buildNav(model(), (id, opts) => seen.push([id, opts.keepQuery]));
+    el.querySelector('.cp-mode-chip[data-mode="cannes"]').click();
+    expect(seen).to.deep.equal([['cannes', false]]);
+  });
+
+  it('switches to the family default when a primary tab is clicked', () => {
+    const seen = [];
+    const { el, setActive } = buildNav(model(), (id) => seen.push(id));
+    setActive('munich', 405);
+    el.querySelector('.cp-family-btn[data-family="accounts"]').click();
+    el.querySelector('.cp-family-btn[data-family="reports"]').click();
+    expect(seen).to.deep.equal(['accounts', 'insights']);
+  });
+
+  it('keeps the query when the context action sends you to All reports', () => {
+    const seen = [];
+    const { el, setActive } = buildNav(model(), (id, opts) => seen.push([id, opts.keepQuery]));
+    setActive('munich', 405);
+    el.querySelector('.cp-context-action').click();
+    expect(seen).to.deep.equal([['insights', true]]);
+  });
+});
+
+describe('customer-picker › applyFilter', () => {
+  function gridWith(names) {
+    const grid = document.createElement('div');
+    const group = document.createElement('div');
+    group.className = 'cp-group';
+    for (const name of names) {
+      const card = document.createElement('button');
+      card.className = 'cp-card';
+      const label = document.createElement('span');
+      label.className = 'cp-card-name';
+      label.textContent = name;
+      card.append(label);
+      group.append(card);
+    }
+    grid.append(group);
+    return grid;
+  }
+
+  it('counts the cards still showing', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch', 'Acme Labs']), 'acme')).to.equal(2);
+  });
+
+  it('returns 0 when nothing matches', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch']), 'zzz')).to.equal(0);
+  });
+
+  it('returns every card for an empty query', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch']), '')).to.equal(2);
+  });
+
+  it('hides a group whose cards all dropped out', () => {
+    const grid = gridWith(['Acme']);
+    applyFilter(grid, 'zzz');
+    expect(grid.querySelector('.cp-group').style.display).to.equal('none');
+  });
+});
+
+describe('customer-picker › report naming', () => {
+  it('calls the bare report a Digital Opportunity Report', () => {
+    const [card] = groupInsightsByWebsite([
+      { Report: 'schiphol.nl', Folder: '/accounts/s/schiphol/insights/schiphol-nl/', Created: '1.05.2026' },
+      { Report: 'schiphol.nl', Folder: '/accounts/s/schiphol/insights/schiphol-nl/cannes-2026/', Created: '2.05.2026' },
+    ]);
+    expect(card.formats[0].label).to.equal('Digital Opportunity Report');
+  });
+});
+
+describe('customer-picker › copy pluralisation', () => {
+  it('says "1 report" not "1 reports" for a single-card event', () => {
+    expect(contextCopy(EVENT_MODE, 1).text).to.equal('The 1 report pinned for Munich Summit 2026.');
+  });
+
+  it('pluralises every other count', () => {
+    expect(contextCopy(EVENT_MODE, 0).text).to.equal('The 0 reports pinned for Munich Summit 2026.');
+    expect(contextCopy(EVENT_MODE, 2).text).to.equal('The 2 reports pinned for Munich Summit 2026.');
+  });
+
+  it('pluralises the empty-state action too', () => {
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 1).action).to.equal('Search all 1 report');
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 4035).action).to.equal('Search all 4,035 reports');
   });
 });

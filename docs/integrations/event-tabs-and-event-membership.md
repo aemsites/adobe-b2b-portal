@@ -50,8 +50,12 @@ One row per tab. Columns:
 
 ### Rules
 
-- **Row order is tab order.** The tabs render left-to-right in sheet row order,
-  after the three built-in tabs (Accounts, Insight Reports, Summit 26 Portal).
+- **Row order is tab order.** Tabs render inside the **Digital Opportunity
+  Reports** section of the picker, as chips left-to-right in sheet row order,
+  after the two code-side entries: **All reports** (the full catalogue) and
+  **Adobe Summit 2026** (which reads `company-list.json`, not an `insights-list`
+  column, so it cannot be a row here). **Accounts** sits in the other primary
+  tab and is unrelated to this sheet.
 - **A row is dropped** if `Column` is blank, if its `Id` duplicates an earlier row,
   or if its `Id` collides with a built-in mode (`accounts`, `insights`, `portal`).
 - **`Id` must never change for an existing tab.** It backs the per-tab
@@ -61,6 +65,9 @@ One row per tab. Columns:
 - The `Id` slug rule, when you omit `Id`: lowercase, every run of non-alphanumeric
   characters becomes `-`, leading/trailing `-` trimmed.
   `"Summit Mumbai 2026"` → `summit-mumbai-2026`.
+- Each tab is deep-linkable as `/adobe/dashboard?tab=<Id>` — another reason not
+  to change an `Id` once links to it exist in the wild. An unknown `tab` value
+  falls back to **All reports** rather than erroring.
 
 ### Current contents
 
@@ -287,6 +294,7 @@ fallback as a safety net, never as the intended path.
 | Another event's cards vanished | A `POST` without read-modify-write clobbered rows |
 | Users lost their "Recently viewed" | An existing tab's `Id` was changed |
 | Card links 404 | The row's `Folder` doesn't point at a published page |
+| A `?tab=` link opens All reports instead | That `Id` no longer exists — it was renamed, or the row was deleted rather than set `Active: false` |
 
 ### Access note
 
@@ -321,5 +329,10 @@ automatically.
 - `deriveEventModes(insightRows)` — the fallback described in §7.
 - `buildEventCompanies(insightRows, column)` — builds the cards for one tab.
 - `slugifyModeId(value)` — the `Id` default rule.
+- `buildNavModel(eventModes)` — groups the resolved modes into the two-level
+  navigation. Event modes pass through with their ids and labels untouched; this
+  function adds no authored surface, which is why the two-level redesign needed
+  no change to either sheet.
+- `resolveTabParam(navModel, raw)` — maps `?tab=` to a mode id.
 
-All four are exported and unit-tested in `test/blocks/customer-picker.test.js`.
+All are exported and unit-tested in `test/blocks/customer-picker.test.js`.

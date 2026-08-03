@@ -1,3 +1,5 @@
+import { buildShareForm, buildShareSection, folderToDeepLink } from './share-form.js';
+
 const LETTERS = '0-9 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z'.split(' ');
 
 const RECENT_MAX = 8;
@@ -53,7 +55,7 @@ const EVENT_FORMATS = {
  * `/data/event-tabs.json`, so **adding an event needs no code change**: add a
  * sheet row + populate the matching column in `insights-list`.
  *
- * Unlike the Insight Reports tab (one card per website globally), event tabs
+ * Unlike the All reports tab (one card per website globally), event tabs
  * build ONE CARD PER FLAGGED ROW so the same company can appear in several
  * events and two companies sharing a page each keep their card.
  */
@@ -133,6 +135,106 @@ export function parseEventModes(configRows, insightRows) {
   return modes.length ? modes : deriveEventModes(insightRows);
 }
 
+/** The mode the picker opens on, and the fallback for an unknown `?tab=`. */
+export const DEFAULT_MODE = 'insights';
+
+/**
+ * Group the resolved modes into the two-level navigation: a FAMILY (what am I
+ * browsing) over a MODE (which slice). Families are code — Accounts belongs to
+ * another team, and `portal`/`insights` read sheets of their own — while the
+ * event modes come straight from `/data/event-tabs.json` via parseEventModes,
+ * in sheet order, ids and labels untouched.
+ *
+ * `Adobe Summit 2026` (the `portal` mode) is an event like the rest, but it
+ * cannot be an event-tabs.json row: it reads `company-list.json` and the
+ * `/customers/` tree, so it has no `insights-list` column to name. Hence it is
+ * pinned here, first among the events.
+ *
+ * `kind` separates "everything we have generated" (`all`) from "pinned for one
+ * event" (`event`) — the distinction the chip row exists to make visible.
+ */
+export function buildNavModel(eventModes) {
+  return [
+    {
+      id: 'reports',
+      label: 'Digital Opportunity Reports',
+      modes: [
+        { id: DEFAULT_MODE, label: 'All reports', kind: 'all' },
+        { id: 'portal', label: 'Adobe Summit 2026', kind: 'event' },
+        ...(eventModes || []).map((e) => ({ id: e.id, label: e.label, kind: 'event' })),
+      ],
+    },
+    {
+      id: 'accounts',
+      label: 'Accounts',
+      modes: [{ id: 'accounts', label: 'Accounts', kind: 'all' }],
+    },
+  ];
+}
+
+/** The family that owns `modeId`, or undefined. */
+export function findFamily(navModel, modeId) {
+  return navModel.find((f) => f.modes.some((m) => m.id === modeId));
+}
+
+/** The mode entry for `modeId`, or undefined. */
+export function findMode(navModel, modeId) {
+  return navModel.flatMap((f) => f.modes).find((m) => m.id === modeId);
+}
+
+/**
+ * Resolve a `?tab=` value to a mode id. Unknown values (a retired event, a
+ * typo, a link from before a rename) fall back to All reports rather than
+ * rendering an empty picker.
+ */
+export function resolveTabParam(navModel, raw) {
+  const id = String(raw == null ? '' : raw).trim().toLowerCase();
+  return findMode(navModel, id) ? id : DEFAULT_MODE;
+}
+
+/** Thousands separators, so "4035 total" reads as "4,035 total". */
+const fmtCount = (n) => Number(n || 0).toLocaleString('en-US');
+
+/** "405 reports" / "1 report" — a one-card event is rare but real (a brand-new
+ *  event with its first row published), and "1 reports" reads like a bug. */
+const fmtReports = (n) => `${fmtCount(n)} ${Number(n) === 1 ? 'report' : 'reports'}`;
+
+/**
+ * One line of orientation under the chip row: which slice am I looking at, how
+ * big is it, and — on an event — how do I get back to the full catalogue. The
+ * way back is offered ALWAYS, not just on an empty search: an event tab showing
+ * 405 of 4,035 reports is the single most confusing state in the picker.
+ * Returns null on Accounts (not this team's surface) and for a missing mode.
+ */
+export function contextCopy(mode, total) {
+  if (!mode || mode.id === 'accounts') return null;
+  if (mode.kind === 'all') {
+    return {
+      text: `Every Digital Opportunity Report we have generated — one card per website. ${fmtCount(total)} total.`,
+      action: null,
+    };
+  }
+  return {
+    text: `The ${fmtReports(total)} pinned for ${mode.label}.`,
+    action: 'Looking for someone else? Search all reports',
+  };
+}
+
+/**
+ * Copy for a search that matched nothing. Without this the grid just goes
+ * blank, so "no report for Acme at this event" is indistinguishable from "no
+ * report for Acme at all" — on an event tab the report is very often sitting in
+ * All reports, hence the action.
+ */
+export function emptyStateCopy(mode, query, allCount) {
+  const q = String(query || '').trim();
+  const isEvent = !!mode && mode.kind === 'event';
+  return {
+    text: isEvent ? `No match for “${q}” in ${mode.label}.` : `No match for “${q}”.`,
+    action: isEvent ? `Search all ${fmtReports(allCount)}` : null,
+  };
+}
+
 /**
  * Per-report data notices. A report's `Report Notice` cell (in insights-list)
  * holds one of these codes when a section was omitted because no data came back
@@ -161,7 +263,7 @@ const REPORT_NOTICES = {
   },
 };
 
-/** Website-report modes (Insight Reports + every event tab) share one dialog
+/** Website-report modes (All reports + every event tab) share one dialog
  *  layout — websites, per-format reports, per-page share — distinct from the
  *  accounts/portal directory layout. */
 function isReportMode(mode) {
@@ -252,7 +354,7 @@ export function groupInsightsByWebsite(rows) {
           .map(([format, v]) => ({ format, label: EVENT_FORMATS[format], folder: v.folder }))
           .sort((a, b) => a.label.localeCompare(b.label));
         const bare = mostRecent(g.variants.filter((v) => v.variant === ''));
-        if (bare) formats.unshift({ format: '', label: 'Insight report', folder: bare.folder });
+        if (bare) formats.unshift({ format: '', label: 'Digital Opportunity Report', folder: bare.folder });
         folder = formats[0].folder;
       } else {
         folder = mostRecent(g.variants).folder;
@@ -296,31 +398,102 @@ export function buildEventCompanies(rows, column) {
   return cards.sort((a, b) => a.Company.localeCompare(b.Company));
 }
 
-function buildModeToggle(onChange, eventModes) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'cp-mode-toggle';
+/**
+ * Two-level navigation. The PRIMARY control answers "what am I browsing"
+ * (reports vs. the Accounts directory another team owns); the SECONDARY chip
+ * row answers "which slice" — All reports, then one chip per event. A hairline
+ * after the All-reports chip (CSS, off `.cp-mode-chip--all`) separates the full
+ * catalogue from the event pins.
+ *
+ * `onChange(modeId, { keepQuery })` — keepQuery is true only for the context
+ * action, which carries the typed search across to All reports.
+ */
+export function buildNav(navModel, onChange) {
+  const el = document.createElement('div');
+  el.className = 'cp-nav';
 
-  for (const { id, label } of [
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'insights', label: 'Insight Reports' },
-    { id: 'portal', label: 'Summit 26 Portal' },
-    ...eventModes.map((e) => ({ id: e.id, label: e.label })),
-  ]) {
+  // --- primary: one button per family ---
+  const primary = document.createElement('div');
+  primary.className = 'cp-mode-toggle';
+  primary.setAttribute('role', 'tablist');
+  primary.setAttribute('aria-label', 'Browse');
+
+  for (const family of navModel) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'cp-mode-btn';
-    btn.dataset.mode = id;
-    btn.textContent = label;
-    if (id === 'accounts') btn.classList.add('cp-mode-btn--active');
-    btn.addEventListener('click', () => {
-      wrapper.querySelectorAll('.cp-mode-btn').forEach((b) => b.classList.remove('cp-mode-btn--active'));
-      btn.classList.add('cp-mode-btn--active');
-      onChange(id);
-    });
-    wrapper.append(btn);
+    btn.className = 'cp-mode-btn cp-family-btn';
+    btn.dataset.family = family.id;
+    btn.textContent = family.label;
+    // A family always opens on its first mode — All reports for reports.
+    btn.addEventListener('click', () => onChange(family.modes[0].id, { keepQuery: false }));
+    primary.append(btn);
   }
 
-  return wrapper;
+  // --- secondary: one chip per mode in the reports family ---
+  const subnav = document.createElement('div');
+  subnav.className = 'cp-subnav';
+  subnav.setAttribute('role', 'tablist');
+  subnav.setAttribute('aria-label', 'Report set');
+
+  const reports = navModel.find((f) => f.id === 'reports');
+  for (const mode of reports.modes) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'cp-mode-chip';
+    if (mode.kind === 'all') chip.classList.add('cp-mode-chip--all');
+    chip.dataset.mode = mode.id;
+    chip.textContent = mode.label;
+    chip.addEventListener('click', () => onChange(mode.id, { keepQuery: false }));
+    subnav.append(chip);
+  }
+
+  // --- context line ---
+  const context = document.createElement('p');
+  context.className = 'cp-context';
+
+  el.append(primary, subnav, context);
+
+  function setActive(modeId, total) {
+    const family = findFamily(navModel, modeId);
+    const mode = findMode(navModel, modeId);
+
+    primary.querySelectorAll('.cp-family-btn').forEach((b) => {
+      const on = !!family && b.dataset.family === family.id;
+      b.classList.toggle('cp-family-btn--active', on);
+      b.classList.toggle('cp-mode-btn--active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+
+    subnav.querySelectorAll('.cp-mode-chip').forEach((c) => {
+      const on = c.dataset.mode === modeId;
+      c.classList.toggle('cp-mode-chip--active', on);
+      c.setAttribute('aria-selected', String(on));
+    });
+
+    // Accounts is a single-mode family: no slice to pick, so no chip row.
+    subnav.hidden = !family || family.id !== 'reports';
+
+    const copy = contextCopy(mode, total);
+    context.replaceChildren();
+    context.hidden = !copy;
+    if (!copy) return;
+
+    const text = document.createElement('span');
+    text.className = 'cp-context-text';
+    text.textContent = copy.text;
+    context.append(text);
+
+    if (copy.action) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'cp-context-action';
+      action.textContent = copy.action;
+      action.addEventListener('click', () => onChange(DEFAULT_MODE, { keepQuery: true }));
+      context.append(action);
+    }
+  }
+
+  return { el, setActive };
 }
 
 function buildSearch() {
@@ -395,204 +568,6 @@ function folderToPath(folder) {
   } catch {
     return folder.replace(/\/$/, '');
   }
-}
-
-/** Same-origin path for a shareable deep link — strips the origin but PRESERVES
- *  the page path exactly (incl. any trailing slash), so a folder/index page
- *  (e.g. `/accounts/.../1800flowers-com/`) resolves to its index. This mirrors
- *  the "Open" CTA, which links to `company.Folder` verbatim. */
-function folderToDeepLink(folder) {
-  try {
-    return new URL(folder).pathname;
-  } catch {
-    return folder;
-  }
-}
-
-// Clipboard icon for the "Copy link" button (inline SVG, currentColor).
-const COPY_ICON = '<svg class="cp-share-copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">'
-  + '<rect x="9" y="9" width="13" height="13" rx="2"/>'
-  + '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-
-/** POST to /auth/sharelink for a page `path`. `mode` is 'email' (send to a
- *  recipient) or 'copy' (mint a link for the caller, no email). Returns the
- *  parsed JSON body plus the HTTP status so callers can branch on both. */
-async function requestShareLink(path, { mode, email } = {}) {
-  const body = { path, mode };
-  if (email) body.email = email;
-  const resp = await fetch('/auth/sharelink', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await resp.json().catch(() => ({}));
-  return { status: resp.status, ok: resp.ok, data };
-}
-
-/**
- * Build the "Share this page" controls for a SPECIFIC page `path`. Two
- * independent ways to share, both minting a 7-day link that opens the page
- * directly (no login):
- *   1. Send link — staff type a recipient; the worker emails them the link,
- *      scoped to just that recipient's domain. The email is required here
- *      because it's where the link actually goes.
- *   2. Copy link — mints a link on click and copies it to the clipboard, with
- *      NO email sent and no email needed: the worker grants every non-staff
- *      domain the page already allows, since there's no single recipient to
- *      scope to. The primary recovery path when a recipient's mail gateway
- *      blocks the emailed copy: paste it into Slack/Teams instead.
- * Page access is still enforced by the page's own CUG for anyone navigating
- * there without the link. Returns the wrapper element.
- */
-function buildShareForm(path) {
-  const wrap = document.createElement('div');
-  wrap.className = 'cp-share-form-wrap';
-
-  const hint = document.createElement('p');
-  hint.className = 'cp-share-hint';
-  hint.textContent = 'A one-click link that opens this page directly — no login needed. Works for 7 days. Type an email to send it directly, or just copy the link below — no email needed.';
-  wrap.append(hint);
-
-  // --- Email path (recipient typed, worker sends the email) ---
-  const form = document.createElement('form');
-  form.className = 'cp-share-form';
-
-  const input = document.createElement('input');
-  input.type = 'email';
-  input.className = 'cp-share-input';
-  input.placeholder = 'name@email.com';
-  input.setAttribute('inputmode', 'email');
-  input.setAttribute('autocomplete', 'off');
-  input.setAttribute('aria-label', "Recipient's (customer) email — required to send the link, not to copy it");
-  input.required = true;
-
-  const button = document.createElement('button');
-  button.type = 'submit';
-  button.className = 'cp-dialog-cta cp-share-send';
-  button.textContent = 'Send link';
-
-  form.append(input, button);
-  wrap.append(form);
-
-  // --- "or" divider ---
-  const divider = document.createElement('div');
-  divider.className = 'cp-share-or';
-  divider.append(Object.assign(document.createElement('span'), { textContent: 'or' }));
-  wrap.append(divider);
-
-  // --- Copy path (mints + copies on click, no email needed) ---
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'cp-dialog-cta cp-dialog-cta--secondary cp-share-copy';
-  copyBtn.innerHTML = `${COPY_ICON}<span class="cp-share-copy-label">Copy link</span>`;
-  wrap.append(copyBtn);
-
-  const status = document.createElement('p');
-  status.className = 'cp-share-status';
-  status.setAttribute('role', 'status');
-  status.setAttribute('aria-live', 'polite');
-  status.hidden = true;
-  wrap.append(status);
-
-  function setStatus(message, kind) {
-    status.textContent = message;
-    status.dataset.kind = kind;
-    status.hidden = false;
-  }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = input.value.trim().toLowerCase();
-    if (!email) return;
-
-    button.disabled = true;
-    input.disabled = true;
-    setStatus('Sending…', 'pending');
-
-    try {
-      const { status: code, ok, data } = await requestShareLink(path, { mode: 'email', email });
-      if (ok && data.result === 'sent') {
-        setStatus(`Sent a 7-day link to ${email} ✓`, 'success');
-        input.value = '';
-      } else if (code === 401) {
-        setStatus('Your session expired — please reload and sign in again.', 'error');
-        input.disabled = false;
-      } else {
-        setStatus(data.error || 'Could not send the link. Please try again.', 'error');
-        input.disabled = false;
-      }
-    } catch {
-      setStatus('Network error — please try again.', 'error');
-      input.disabled = false;
-    } finally {
-      button.disabled = false;
-    }
-  });
-
-  const copyLabel = copyBtn.querySelector('.cp-share-copy-label');
-  let copyResetTimer;
-  copyBtn.addEventListener('click', async () => {
-    clearTimeout(copyResetTimer);
-
-    copyBtn.disabled = true;
-    setStatus('Generating link…', 'pending');
-
-    try {
-      const { status: code, ok, data } = await requestShareLink(path, { mode: 'copy' });
-      if (ok && data.result === 'link' && data.link) {
-        try {
-          await navigator.clipboard.writeText(data.link);
-        } catch {
-          // Clipboard API blocked (insecure context / permissions): fall back to
-          // a hidden textarea + execCommand so Copy still works.
-          const ta = document.createElement('textarea');
-          ta.value = data.link;
-          ta.style.position = 'fixed';
-          ta.style.opacity = '0';
-          document.body.append(ta);
-          ta.select();
-          document.execCommand?.('copy');
-          ta.remove();
-        }
-        copyLabel.textContent = 'Copied ✓';
-        setStatus('Link copied — paste it into Slack, Teams, or anywhere.', 'success');
-        copyResetTimer = setTimeout(() => { copyLabel.textContent = 'Copy link'; }, 2500);
-      } else if (code === 401) {
-        setStatus('Your session expired — please reload and sign in again.', 'error');
-      } else {
-        setStatus(data.error || 'Could not generate the link. Please try again.', 'error');
-      }
-    } catch {
-      setStatus('Network error — please try again.', 'error');
-    } finally {
-      copyBtn.disabled = false;
-    }
-  });
-
-  return wrap;
-}
-
-/**
- * Single "Share this page" section bound to one page `path`. Used by
- * accounts/portal modes (one page per card). Insight reports share per format
- * instead (see the format rows in renderDialog).
- */
-function buildShareSection(company) {
-  if (!company.Folder) return null;
-
-  // Preserve the trailing slash so the link lands on the folder's index page,
-  // matching the "Open" CTA (which uses company.Folder verbatim).
-  const path = folderToDeepLink(company.Folder);
-
-  const section = document.createElement('div');
-  section.className = 'cp-dialog-section cp-share';
-
-  const heading = document.createElement('h4');
-  heading.textContent = 'Share this page';
-  section.append(heading);
-
-  section.append(buildShareForm(path));
-  return section;
 }
 
 function renderDialog(content, company, websiteMap, domainMap, mode) {
@@ -688,7 +663,7 @@ function renderDialog(content, company, websiteMap, domainMap, mode) {
         </div>
       </div>`;
     } else if (company.Folder) {
-      const ctaLabel = isReport ? 'Open insight report' : 'Open customer portal page';
+      const ctaLabel = isReport ? 'Open Digital Opportunity Report' : 'Open customer portal page';
       const editUrl = `https://da.live/canvas#/aemsites/summit-portal${folderToPath(company.Folder)}/index`;
       html += `<div class="cp-dialog-actions">
         <a class="cp-dialog-cta" href="${company.Folder}" target="_blank" rel="noopener">${ctaLabel} &rarr;</a>
@@ -699,7 +674,7 @@ function renderDialog(content, company, websiteMap, domainMap, mode) {
 
   content.innerHTML = html;
 
-  // Insight reports: share PER FORMAT. Each "Share" button toggles a share form
+  // Report modes: share PER FORMAT. Each "Share" button toggles a share form
   // bound to that format's specific page (lazily built on first open).
   if (isReport && company.formats && company.formats.length) {
     content.querySelectorAll('.cp-format').forEach((row) => {
@@ -810,9 +785,13 @@ function buildGrid(companies, onOpen) {
   return { grid, groups: sortedGroups };
 }
 
-function applyFilter(container, query) {
+/** Hide cards that do not match `query`, hide groups left with none, and return
+ *  how many cards are still visible — the caller uses that to decide whether to
+ *  show the empty state. */
+export function applyFilter(container, query) {
   const q = query.toLowerCase().trim();
   const groups = container.querySelectorAll('.cp-group');
+  let total = 0;
 
   for (const group of groups) {
     const cards = group.querySelectorAll('.cp-card');
@@ -826,7 +805,10 @@ function applyFilter(container, query) {
     }
 
     group.style.display = visibleCount > 0 ? '' : 'none';
+    total += visibleCount;
   }
+
+  return total;
 }
 
 function buildLookupMaps(companyData, cugData) {
@@ -862,9 +844,9 @@ function buildLookupMaps(companyData, cugData) {
 }
 
 const SEARCH_PLACEHOLDERS = {
-  insights: 'Search insight reports…',
+  insights: 'Search all Digital Opportunity Reports…',
   accounts: 'Search accounts…',
-  portal: 'Search customers…',
+  portal: 'Search Adobe Summit 2026…',
 };
 
 export default async function init(el) {
@@ -892,7 +874,7 @@ export default async function init(el) {
 
   const portalCompanies = (await portalResp.json()).data || [];
   const insightRows = insightsResp.ok ? ((await insightsResp.json()).data || []) : [];
-  // Insight reports: one row per website×variant in the sheet → collapse to one
+  // All reports: one row per website×variant in the sheet → collapse to one
   // card per website, each carrying its available landing-page formats.
   const insightsCompanies = groupInsightsByWebsite(insightRows);
   // Which event tabs exist is authored in /data/event-tabs.json — no code change
@@ -919,9 +901,17 @@ export default async function init(el) {
 
   el.textContent = '';
 
+  const navModel = buildNavModel(eventModes);
+  const companiesMap = {
+    insights: insightsCompanies,
+    accounts: accountsCompanies,
+    portal: portalCompanies,
+    ...eventCompanies,
+  };
+
   const { backdrop, close, content: dialogContent } = buildDialog();
   let activeCard = null;
-  let currentMode = 'insights';
+  let currentMode = DEFAULT_MODE;
 
   function closeDialog() {
     backdrop.hidden = true;
@@ -950,17 +940,53 @@ export default async function init(el) {
   const navContainer = document.createElement('div');
   const gridContainer = document.createElement('div');
 
-  function renderMode(mode) {
+  // Declared before renderMode so renderMode can call nav.setActive without
+  // tripping no-use-before-define; assigned once renderMode exists, because
+  // buildNav takes it as the change handler.
+  let nav;
+
+  // Shown in place of the grid when a search matches nothing. On an event tab it
+  // carries the way out — the report is usually in All reports.
+  const empty = document.createElement('div');
+  empty.className = 'cp-empty';
+  empty.hidden = true;
+
+  /** Show or hide the empty state for `visible` matches of the current query. */
+  function renderEmptyState(visible) {
+    const query = searchInput.value;
+    if (visible > 0 || !query.trim()) {
+      empty.hidden = true;
+      empty.replaceChildren();
+      return;
+    }
+    const copy = emptyStateCopy(findMode(navModel, currentMode), query, insightsCompanies.length);
+    const text = document.createElement('p');
+    text.className = 'cp-empty-text';
+    text.textContent = copy.text;
+    empty.replaceChildren(text);
+    if (copy.action) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'cp-empty-action';
+      action.textContent = copy.action;
+      // eslint-disable-next-line no-use-before-define
+      action.addEventListener('click', () => renderMode(DEFAULT_MODE, { keepQuery: true }));
+      empty.append(action);
+    }
+    empty.hidden = false;
+  }
+
+  /**
+   * Render one mode. `keepQuery` carries the typed search across a mode switch —
+   * used by the context line and the empty state, which exist precisely so a
+   * fruitless event search can be retried against the full catalogue without
+   * retyping.
+   */
+  function renderMode(mode, { keepQuery = false } = {}) {
     currentMode = mode;
     closeDialog();
-    const companiesMap = {
-      insights: insightsCompanies,
-      accounts: accountsCompanies,
-      portal: portalCompanies,
-      ...eventCompanies,
-    };
     const companies = companiesMap[mode] || [];
-    searchInput.value = '';
+    if (!keepQuery) searchInput.value = '';
     const event = eventModes.find((e) => e.id === mode);
     searchInput.placeholder = SEARCH_PLACEHOLDERS[mode]
       || (event ? `Search ${event.label}…` : 'Search…');
@@ -971,17 +997,33 @@ export default async function init(el) {
     const recentBand = buildRecentBand(mode, companies, openDialog);
     if (recentBand) navContainer.replaceChildren(recentBand, letterNav);
     else navContainer.replaceChildren(letterNav);
-    gridContainer.replaceChildren(grid);
+    gridContainer.replaceChildren(grid, empty);
+
+    nav.setActive(mode, companies.length);
+
+    const query = searchInput.value;
+    renderEmptyState(query.trim() ? applyFilter(grid, query) : companies.length);
+
+    // Keep the URL shareable: ?tab=<mode> reopens this exact tab.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', mode);
+      window.history.replaceState(null, '', url);
+    } catch {
+      // ignore: history unavailable (sandboxed iframe / opaque origin)
+    }
   }
 
-  const modeToggle = buildModeToggle(renderMode, eventModes);
-  el.append(modeToggle, searchWrapper, navContainer, gridContainer);
-  renderMode('accounts');
+  nav = buildNav(navModel, renderMode);
+  el.append(nav.el, searchWrapper, navContainer, gridContainer);
+
+  const initialTab = new URLSearchParams(window.location.search).get('tab');
+  renderMode(resolveTabParam(navModel, initialTab));
 
   let debounce;
   searchInput.addEventListener('input', () => {
     clearTimeout(debounce);
     const grid = gridContainer.querySelector('.cp-grid');
-    debounce = setTimeout(() => applyFilter(grid, searchInput.value), 120);
+    debounce = setTimeout(() => renderEmptyState(applyFilter(grid, searchInput.value)), 120);
   });
 }
