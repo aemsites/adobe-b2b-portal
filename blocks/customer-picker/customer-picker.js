@@ -394,31 +394,102 @@ export function buildEventCompanies(rows, column) {
   return cards.sort((a, b) => a.Company.localeCompare(b.Company));
 }
 
-function buildModeToggle(onChange, eventModes) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'cp-mode-toggle';
+/**
+ * Two-level navigation. The PRIMARY control answers "what am I browsing"
+ * (reports vs. the Accounts directory another team owns); the SECONDARY chip
+ * row answers "which slice" — All reports, then one chip per event. A hairline
+ * after the All-reports chip (CSS, off `.cp-mode-chip--all`) separates the full
+ * catalogue from the event pins.
+ *
+ * `onChange(modeId, { keepQuery })` — keepQuery is true only for the context
+ * action, which carries the typed search across to All reports.
+ */
+export function buildNav(navModel, onChange) {
+  const el = document.createElement('div');
+  el.className = 'cp-nav';
 
-  for (const { id, label } of [
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'insights', label: 'Insight Reports' },
-    { id: 'portal', label: 'Summit 26 Portal' },
-    ...eventModes.map((e) => ({ id: e.id, label: e.label })),
-  ]) {
+  // --- primary: one button per family ---
+  const primary = document.createElement('div');
+  primary.className = 'cp-mode-toggle';
+  primary.setAttribute('role', 'tablist');
+  primary.setAttribute('aria-label', 'Browse');
+
+  for (const family of navModel) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'cp-mode-btn';
-    btn.dataset.mode = id;
-    btn.textContent = label;
-    if (id === 'accounts') btn.classList.add('cp-mode-btn--active');
-    btn.addEventListener('click', () => {
-      wrapper.querySelectorAll('.cp-mode-btn').forEach((b) => b.classList.remove('cp-mode-btn--active'));
-      btn.classList.add('cp-mode-btn--active');
-      onChange(id);
-    });
-    wrapper.append(btn);
+    btn.className = 'cp-mode-btn cp-family-btn';
+    btn.dataset.family = family.id;
+    btn.textContent = family.label;
+    // A family always opens on its first mode — All reports for reports.
+    btn.addEventListener('click', () => onChange(family.modes[0].id, { keepQuery: false }));
+    primary.append(btn);
   }
 
-  return wrapper;
+  // --- secondary: one chip per mode in the reports family ---
+  const subnav = document.createElement('div');
+  subnav.className = 'cp-subnav';
+  subnav.setAttribute('role', 'tablist');
+  subnav.setAttribute('aria-label', 'Report set');
+
+  const reports = navModel.find((f) => f.id === 'reports');
+  for (const mode of reports.modes) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'cp-mode-chip';
+    if (mode.kind === 'all') chip.classList.add('cp-mode-chip--all');
+    chip.dataset.mode = mode.id;
+    chip.textContent = mode.label;
+    chip.addEventListener('click', () => onChange(mode.id, { keepQuery: false }));
+    subnav.append(chip);
+  }
+
+  // --- context line ---
+  const context = document.createElement('p');
+  context.className = 'cp-context';
+
+  el.append(primary, subnav, context);
+
+  function setActive(modeId, total) {
+    const family = findFamily(navModel, modeId);
+    const mode = findMode(navModel, modeId);
+
+    primary.querySelectorAll('.cp-family-btn').forEach((b) => {
+      const on = !!family && b.dataset.family === family.id;
+      b.classList.toggle('cp-family-btn--active', on);
+      b.classList.toggle('cp-mode-btn--active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+
+    subnav.querySelectorAll('.cp-mode-chip').forEach((c) => {
+      const on = c.dataset.mode === modeId;
+      c.classList.toggle('cp-mode-chip--active', on);
+      c.setAttribute('aria-selected', String(on));
+    });
+
+    // Accounts is a single-mode family: no slice to pick, so no chip row.
+    subnav.hidden = !family || family.id !== 'reports';
+
+    const copy = contextCopy(mode, total);
+    context.replaceChildren();
+    context.hidden = !copy;
+    if (!copy) return;
+
+    const text = document.createElement('span');
+    text.className = 'cp-context-text';
+    text.textContent = copy.text;
+    context.append(text);
+
+    if (copy.action) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'cp-context-action';
+      action.textContent = copy.action;
+      action.addEventListener('click', () => onChange(DEFAULT_MODE, { keepQuery: true }));
+      context.append(action);
+    }
+  }
+
+  return { el, setActive };
 }
 
 function buildSearch() {
@@ -710,9 +781,13 @@ function buildGrid(companies, onOpen) {
   return { grid, groups: sortedGroups };
 }
 
-function applyFilter(container, query) {
+/** Hide cards that do not match `query`, hide groups left with none, and return
+ *  how many cards are still visible — the caller uses that to decide whether to
+ *  show the empty state. */
+export function applyFilter(container, query) {
   const q = query.toLowerCase().trim();
   const groups = container.querySelectorAll('.cp-group');
+  let total = 0;
 
   for (const group of groups) {
     const cards = group.querySelectorAll('.cp-card');
@@ -726,7 +801,10 @@ function applyFilter(container, query) {
     }
 
     group.style.display = visibleCount > 0 ? '' : 'none';
+    total += visibleCount;
   }
+
+  return total;
 }
 
 function buildLookupMaps(companyData, cugData) {
@@ -762,9 +840,9 @@ function buildLookupMaps(companyData, cugData) {
 }
 
 const SEARCH_PLACEHOLDERS = {
-  insights: 'Search insight reports…',
+  insights: 'Search all Digital Opportunity Reports…',
   accounts: 'Search accounts…',
-  portal: 'Search customers…',
+  portal: 'Search Adobe Summit 2026…',
 };
 
 export default async function init(el) {
@@ -819,9 +897,17 @@ export default async function init(el) {
 
   el.textContent = '';
 
+  const navModel = buildNavModel(eventModes);
+  const companiesMap = {
+    insights: insightsCompanies,
+    accounts: accountsCompanies,
+    portal: portalCompanies,
+    ...eventCompanies,
+  };
+
   const { backdrop, close, content: dialogContent } = buildDialog();
   let activeCard = null;
-  let currentMode = 'insights';
+  let currentMode = DEFAULT_MODE;
 
   function closeDialog() {
     backdrop.hidden = true;
@@ -850,17 +936,53 @@ export default async function init(el) {
   const navContainer = document.createElement('div');
   const gridContainer = document.createElement('div');
 
-  function renderMode(mode) {
+  // Declared before renderMode so renderMode can call nav.setActive without
+  // tripping no-use-before-define; assigned once renderMode exists, because
+  // buildNav takes it as the change handler.
+  let nav;
+
+  // Shown in place of the grid when a search matches nothing. On an event tab it
+  // carries the way out — the report is usually in All reports.
+  const empty = document.createElement('div');
+  empty.className = 'cp-empty';
+  empty.hidden = true;
+
+  /** Show or hide the empty state for `visible` matches of the current query. */
+  function renderEmptyState(visible) {
+    const query = searchInput.value;
+    if (visible > 0 || !query.trim()) {
+      empty.hidden = true;
+      empty.replaceChildren();
+      return;
+    }
+    const copy = emptyStateCopy(findMode(navModel, currentMode), query, insightsCompanies.length);
+    const text = document.createElement('p');
+    text.className = 'cp-empty-text';
+    text.textContent = copy.text;
+    empty.replaceChildren(text);
+    if (copy.action) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'cp-empty-action';
+      action.textContent = copy.action;
+      // eslint-disable-next-line no-use-before-define
+      action.addEventListener('click', () => renderMode(DEFAULT_MODE, { keepQuery: true }));
+      empty.append(action);
+    }
+    empty.hidden = false;
+  }
+
+  /**
+   * Render one mode. `keepQuery` carries the typed search across a mode switch —
+   * used by the context line and the empty state, which exist precisely so a
+   * fruitless event search can be retried against the full catalogue without
+   * retyping.
+   */
+  function renderMode(mode, { keepQuery = false } = {}) {
     currentMode = mode;
     closeDialog();
-    const companiesMap = {
-      insights: insightsCompanies,
-      accounts: accountsCompanies,
-      portal: portalCompanies,
-      ...eventCompanies,
-    };
     const companies = companiesMap[mode] || [];
-    searchInput.value = '';
+    if (!keepQuery) searchInput.value = '';
     const event = eventModes.find((e) => e.id === mode);
     searchInput.placeholder = SEARCH_PLACEHOLDERS[mode]
       || (event ? `Search ${event.label}…` : 'Search…');
@@ -871,17 +993,33 @@ export default async function init(el) {
     const recentBand = buildRecentBand(mode, companies, openDialog);
     if (recentBand) navContainer.replaceChildren(recentBand, letterNav);
     else navContainer.replaceChildren(letterNav);
-    gridContainer.replaceChildren(grid);
+    gridContainer.replaceChildren(grid, empty);
+
+    nav.setActive(mode, companies.length);
+
+    const query = searchInput.value;
+    renderEmptyState(query.trim() ? applyFilter(grid, query) : companies.length);
+
+    // Keep the URL shareable: ?tab=<mode> reopens this exact tab.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', mode);
+      window.history.replaceState(null, '', url);
+    } catch {
+      // ignore: history unavailable (sandboxed iframe / opaque origin)
+    }
   }
 
-  const modeToggle = buildModeToggle(renderMode, eventModes);
-  el.append(modeToggle, searchWrapper, navContainer, gridContainer);
-  renderMode('accounts');
+  nav = buildNav(navModel, renderMode);
+  el.append(nav.el, searchWrapper, navContainer, gridContainer);
+
+  const initialTab = new URLSearchParams(window.location.search).get('tab');
+  renderMode(resolveTabParam(navModel, initialTab));
 
   let debounce;
   searchInput.addEventListener('input', () => {
     clearTimeout(debounce);
     const grid = gridContainer.querySelector('.cp-grid');
-    debounce = setTimeout(() => applyFilter(grid, searchInput.value), 120);
+    debounce = setTimeout(() => renderEmptyState(applyFilter(grid, searchInput.value)), 120);
   });
 }

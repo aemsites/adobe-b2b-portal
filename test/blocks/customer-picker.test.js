@@ -12,6 +12,8 @@ import {
   resolveTabParam,
   contextCopy,
   emptyStateCopy,
+  buildNav,
+  applyFilter,
 } from '../../blocks/customer-picker/customer-picker.js';
 import { buildShareForm, buildShareSection, folderToDeepLink } from '../../blocks/customer-picker/share-form.js';
 
@@ -486,5 +488,119 @@ describe('customer-picker › emptyStateCopy', () => {
 
   it('trims the echoed query', () => {
     expect(emptyStateCopy(ALL_MODE, '  acme  ', 10).text).to.equal('No match for “acme”.');
+  });
+});
+
+describe('customer-picker › buildNav', () => {
+  const model = () => buildNavModel(EVENT_MODES);
+
+  it('renders exactly two primary tabs', () => {
+    const { el } = buildNav(model(), () => {});
+    const labels = [...el.querySelectorAll('.cp-family-btn')].map((b) => b.textContent);
+    expect(labels).to.deep.equal(['Digital Opportunity Reports', 'Accounts']);
+  });
+
+  it('renders one chip per reports mode, in model order', () => {
+    const { el } = buildNav(model(), () => {});
+    const chips = [...el.querySelectorAll('.cp-mode-chip')];
+    expect(chips.map((c) => c.dataset.mode)).to.deep.equal(['insights', 'portal', 'cannes', 'munich']);
+  });
+
+  it('marks the All-reports chip so the divider can hang off it', () => {
+    const { el } = buildNav(model(), () => {});
+    expect(el.querySelector('.cp-mode-chip[data-mode="insights"]').classList.contains('cp-mode-chip--all')).to.equal(true);
+    expect(el.querySelector('.cp-mode-chip[data-mode="munich"]').classList.contains('cp-mode-chip--all')).to.equal(false);
+  });
+
+  it('activates the family and chip for the current mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('munich', 405);
+    expect(el.querySelector('.cp-family-btn--active').dataset.family).to.equal('reports');
+    expect(el.querySelector('.cp-mode-chip--active').dataset.mode).to.equal('munich');
+  });
+
+  it('hides the chip row on Accounts and shows it again on a report mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    const chipRow = el.querySelector('.cp-subnav');
+    setActive('accounts', 1844);
+    expect(chipRow.hidden).to.equal(true);
+    setActive('insights', 4035);
+    expect(chipRow.hidden).to.equal(false);
+  });
+
+  it('writes the context line for the active mode', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('munich', 405);
+    expect(el.querySelector('.cp-context-text').textContent).to.equal('The 405 reports pinned for Munich Summit 2026.');
+    expect(el.querySelector('.cp-context-action').textContent).to.equal('Looking for someone else? Search all reports');
+  });
+
+  it('drops the context action on All reports and hides the line on Accounts', () => {
+    const { el, setActive } = buildNav(model(), () => {});
+    setActive('insights', 4035);
+    expect(el.querySelector('.cp-context-action')).to.equal(null);
+    setActive('accounts', 1844);
+    expect(el.querySelector('.cp-context').hidden).to.equal(true);
+  });
+
+  it('reports a chip click without asking to keep the query', () => {
+    const seen = [];
+    const { el } = buildNav(model(), (id, opts) => seen.push([id, opts.keepQuery]));
+    el.querySelector('.cp-mode-chip[data-mode="cannes"]').click();
+    expect(seen).to.deep.equal([['cannes', false]]);
+  });
+
+  it('switches to the family default when a primary tab is clicked', () => {
+    const seen = [];
+    const { el, setActive } = buildNav(model(), (id) => seen.push(id));
+    setActive('munich', 405);
+    el.querySelector('.cp-family-btn[data-family="accounts"]').click();
+    el.querySelector('.cp-family-btn[data-family="reports"]').click();
+    expect(seen).to.deep.equal(['accounts', 'insights']);
+  });
+
+  it('keeps the query when the context action sends you to All reports', () => {
+    const seen = [];
+    const { el, setActive } = buildNav(model(), (id, opts) => seen.push([id, opts.keepQuery]));
+    setActive('munich', 405);
+    el.querySelector('.cp-context-action').click();
+    expect(seen).to.deep.equal([['insights', true]]);
+  });
+});
+
+describe('customer-picker › applyFilter', () => {
+  function gridWith(names) {
+    const grid = document.createElement('div');
+    const group = document.createElement('div');
+    group.className = 'cp-group';
+    for (const name of names) {
+      const card = document.createElement('button');
+      card.className = 'cp-card';
+      const label = document.createElement('span');
+      label.className = 'cp-card-name';
+      label.textContent = name;
+      card.append(label);
+      group.append(card);
+    }
+    grid.append(group);
+    return grid;
+  }
+
+  it('counts the cards still showing', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch', 'Acme Labs']), 'acme')).to.equal(2);
+  });
+
+  it('returns 0 when nothing matches', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch']), 'zzz')).to.equal(0);
+  });
+
+  it('returns every card for an empty query', () => {
+    expect(applyFilter(gridWith(['Acme', 'Bosch']), '')).to.equal(2);
+  });
+
+  it('hides a group whose cards all dropped out', () => {
+    const grid = gridWith(['Acme']);
+    applyFilter(grid, 'zzz');
+    expect(grid.querySelector('.cp-group').style.display).to.equal('none');
   });
 });
