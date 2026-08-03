@@ -6,6 +6,10 @@ import {
   parseEventModes,
   deriveEventModes,
   slugifyModeId,
+  buildNavModel,
+  findFamily,
+  findMode,
+  resolveTabParam,
 } from '../../blocks/customer-picker/customer-picker.js';
 import { buildShareForm, buildShareSection, folderToDeepLink } from '../../blocks/customer-picker/share-form.js';
 
@@ -346,5 +350,87 @@ describe('customer-picker › share-form', () => {
 
   it('returns null when the company has no folder', () => {
     expect(buildShareSection({ Company: 'Acme' })).to.equal(null);
+  });
+});
+
+const EVENT_MODES = [
+  { id: 'cannes', label: 'Cannes 2026 Portal', column: 'Cannes 2026' },
+  { id: 'munich', label: 'Munich Summit 2026', column: 'Munich Summit 2026' },
+];
+
+describe('customer-picker › buildNavModel', () => {
+  it('splits the modes into exactly two families', () => {
+    const model = buildNavModel(EVENT_MODES);
+    expect(model.map((f) => f.id)).to.deep.equal(['reports', 'accounts']);
+    expect(model[0].label).to.equal('Digital Opportunity Reports');
+    expect(model[1].label).to.equal('Accounts');
+  });
+
+  it('leads the reports family with All reports, then Adobe Summit 2026, then the sheet rows in order', () => {
+    const [reports] = buildNavModel(EVENT_MODES);
+    expect(reports.modes.map((m) => m.id)).to.deep.equal(['insights', 'portal', 'cannes', 'munich']);
+    expect(reports.modes.map((m) => m.label)).to.deep.equal([
+      'All reports', 'Adobe Summit 2026', 'Cannes 2026 Portal', 'Munich Summit 2026',
+    ]);
+  });
+
+  it('marks only All reports as the "all" kind — everything else is an event', () => {
+    const [reports] = buildNavModel(EVENT_MODES);
+    expect(reports.modes.map((m) => m.kind)).to.deep.equal(['all', 'event', 'event', 'event']);
+  });
+
+  it('gives the accounts family a single mode', () => {
+    const [, accounts] = buildNavModel(EVENT_MODES);
+    expect(accounts.modes.map((m) => m.id)).to.deep.equal(['accounts']);
+  });
+
+  it('still renders All reports and Adobe Summit 2026 when the sheet yields no events', () => {
+    const [reports] = buildNavModel([]);
+    expect(reports.modes.map((m) => m.id)).to.deep.equal(['insights', 'portal']);
+  });
+
+  it('never invents or rewrites a mode id — every event id survives verbatim', () => {
+    const [reports] = buildNavModel([{ id: 'summit-tokyo-2027', label: 'Tokyo', column: 'Summit Tokyo 2027' }]);
+    expect(reports.modes.map((m) => m.id)).to.include('summit-tokyo-2027');
+  });
+});
+
+describe('customer-picker › findFamily / findMode', () => {
+  it('finds the family that owns a mode', () => {
+    const model = buildNavModel(EVENT_MODES);
+    expect(findFamily(model, 'munich').id).to.equal('reports');
+    expect(findFamily(model, 'accounts').id).to.equal('accounts');
+  });
+
+  it('returns undefined for an unknown mode', () => {
+    expect(findFamily(buildNavModel(EVENT_MODES), 'nope')).to.equal(undefined);
+    expect(findMode(buildNavModel(EVENT_MODES), 'nope')).to.equal(undefined);
+  });
+
+  it('finds a mode by id', () => {
+    expect(findMode(buildNavModel(EVENT_MODES), 'cannes').label).to.equal('Cannes 2026 Portal');
+  });
+});
+
+describe('customer-picker › resolveTabParam', () => {
+  const model = buildNavModel(EVENT_MODES);
+
+  it('accepts a known mode id', () => {
+    expect(resolveTabParam(model, 'munich')).to.equal('munich');
+  });
+
+  it('accepts accounts', () => {
+    expect(resolveTabParam(model, 'accounts')).to.equal('accounts');
+  });
+
+  it('is case- and whitespace-insensitive', () => {
+    expect(resolveTabParam(model, '  MUNICH ')).to.equal('munich');
+  });
+
+  it('falls back to All reports for an unknown, empty or missing value', () => {
+    expect(resolveTabParam(model, 'retired-event')).to.equal('insights');
+    expect(resolveTabParam(model, '')).to.equal('insights');
+    expect(resolveTabParam(model, null)).to.equal('insights');
+    expect(resolveTabParam(model, undefined)).to.equal('insights');
   });
 });

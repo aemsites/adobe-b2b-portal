@@ -135,6 +135,63 @@ export function parseEventModes(configRows, insightRows) {
   return modes.length ? modes : deriveEventModes(insightRows);
 }
 
+/** The mode the picker opens on, and the fallback for an unknown `?tab=`. */
+export const DEFAULT_MODE = 'insights';
+
+/**
+ * Group the resolved modes into the two-level navigation: a FAMILY (what am I
+ * browsing) over a MODE (which slice). Families are code — Accounts belongs to
+ * another team, and `portal`/`insights` read sheets of their own — while the
+ * event modes come straight from `/data/event-tabs.json` via parseEventModes,
+ * in sheet order, ids and labels untouched.
+ *
+ * `Adobe Summit 2026` (the `portal` mode) is an event like the rest, but it
+ * cannot be an event-tabs.json row: it reads `company-list.json` and the
+ * `/customers/` tree, so it has no `insights-list` column to name. Hence it is
+ * pinned here, first among the events.
+ *
+ * `kind` separates "everything we have generated" (`all`) from "pinned for one
+ * event" (`event`) — the distinction the chip row exists to make visible.
+ */
+export function buildNavModel(eventModes) {
+  return [
+    {
+      id: 'reports',
+      label: 'Digital Opportunity Reports',
+      modes: [
+        { id: DEFAULT_MODE, label: 'All reports', kind: 'all' },
+        { id: 'portal', label: 'Adobe Summit 2026', kind: 'event' },
+        ...(eventModes || []).map((e) => ({ id: e.id, label: e.label, kind: 'event' })),
+      ],
+    },
+    {
+      id: 'accounts',
+      label: 'Accounts',
+      modes: [{ id: 'accounts', label: 'Accounts', kind: 'all' }],
+    },
+  ];
+}
+
+/** The family that owns `modeId`, or undefined. */
+export function findFamily(navModel, modeId) {
+  return navModel.find((f) => f.modes.some((m) => m.id === modeId));
+}
+
+/** The mode entry for `modeId`, or undefined. */
+export function findMode(navModel, modeId) {
+  return navModel.flatMap((f) => f.modes).find((m) => m.id === modeId);
+}
+
+/**
+ * Resolve a `?tab=` value to a mode id. Unknown values (a retired event, a
+ * typo, a link from before a rename) fall back to All reports rather than
+ * rendering an empty picker.
+ */
+export function resolveTabParam(navModel, raw) {
+  const id = String(raw == null ? '' : raw).trim().toLowerCase();
+  return findMode(navModel, id) ? id : DEFAULT_MODE;
+}
+
 /**
  * Per-report data notices. A report's `Report Notice` cell (in insights-list)
  * holds one of these codes when a section was omitted because no data came back
