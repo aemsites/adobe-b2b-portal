@@ -195,6 +195,10 @@ export function resolveTabParam(navModel, raw) {
 /** Thousands separators, so "4035 total" reads as "4,035 total". */
 const fmtCount = (n) => Number(n || 0).toLocaleString('en-US');
 
+/** "405 reports" / "1 report" — a one-card event is rare but real (a brand-new
+ *  event with its first row published), and "1 reports" reads like a bug. */
+const fmtReports = (n) => `${fmtCount(n)} ${Number(n) === 1 ? 'report' : 'reports'}`;
+
 /**
  * One line of orientation under the chip row: which slice am I looking at, how
  * big is it, and — on an event — how do I get back to the full catalogue. The
@@ -211,7 +215,7 @@ export function contextCopy(mode, total) {
     };
   }
   return {
-    text: `The ${fmtCount(total)} reports pinned for ${mode.label}.`,
+    text: `The ${fmtReports(total)} pinned for ${mode.label}.`,
     action: 'Looking for someone else? Search all reports',
   };
 }
@@ -227,7 +231,7 @@ export function emptyStateCopy(mode, query, allCount) {
   const isEvent = !!mode && mode.kind === 'event';
   return {
     text: isEvent ? `No match for “${q}” in ${mode.label}.` : `No match for “${q}”.`,
-    action: isEvent ? `Search all ${fmtCount(allCount)} reports` : null,
+    action: isEvent ? `Search all ${fmtReports(allCount)}` : null,
   };
 }
 

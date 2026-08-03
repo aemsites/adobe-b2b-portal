@@ -614,3 +614,19 @@ describe('customer-picker › report naming', () => {
     expect(card.formats[0].label).to.equal('Digital Opportunity Report');
   });
 });
+
+describe('customer-picker › copy pluralisation', () => {
+  it('says "1 report" not "1 reports" for a single-card event', () => {
+    expect(contextCopy(EVENT_MODE, 1).text).to.equal('The 1 report pinned for Munich Summit 2026.');
+  });
+
+  it('pluralises every other count', () => {
+    expect(contextCopy(EVENT_MODE, 0).text).to.equal('The 0 reports pinned for Munich Summit 2026.');
+    expect(contextCopy(EVENT_MODE, 2).text).to.equal('The 2 reports pinned for Munich Summit 2026.');
+  });
+
+  it('pluralises the empty-state action too', () => {
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 1).action).to.equal('Search all 1 report');
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 4035).action).to.equal('Search all 4,035 reports');
+  });
+});
