@@ -181,7 +181,7 @@ export function buildShareForm(path) {
 
 /**
  * Single "Share this page" section bound to one page `path`. Used by
- * accounts/portal modes (one page per card). Insight reports share per format
+ * accounts/portal modes (one page per card). Report modes share per format
  * instead (see the format rows in renderDialog).
  */
 export function buildShareSection(company) {

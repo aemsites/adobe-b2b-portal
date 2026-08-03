@@ -604,3 +604,13 @@ describe('customer-picker › applyFilter', () => {
     expect(grid.querySelector('.cp-group').style.display).to.equal('none');
   });
 });
+
+describe('customer-picker › report naming', () => {
+  it('calls the bare report a Digital Opportunity Report', () => {
+    const [card] = groupInsightsByWebsite([
+      { Report: 'schiphol.nl', Folder: '/accounts/s/schiphol/insights/schiphol-nl/', Created: '1.05.2026' },
+      { Report: 'schiphol.nl', Folder: '/accounts/s/schiphol/insights/schiphol-nl/cannes-2026/', Created: '2.05.2026' },
+    ]);
+    expect(card.formats[0].label).to.equal('Digital Opportunity Report');
+  });
+});

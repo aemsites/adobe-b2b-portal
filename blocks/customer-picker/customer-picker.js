@@ -55,7 +55,7 @@ const EVENT_FORMATS = {
  * `/data/event-tabs.json`, so **adding an event needs no code change**: add a
  * sheet row + populate the matching column in `insights-list`.
  *
- * Unlike the Insight Reports tab (one card per website globally), event tabs
+ * Unlike the All reports tab (one card per website globally), event tabs
  * build ONE CARD PER FLAGGED ROW so the same company can appear in several
  * events and two companies sharing a page each keep their card.
  */
@@ -259,7 +259,7 @@ const REPORT_NOTICES = {
   },
 };
 
-/** Website-report modes (Insight Reports + every event tab) share one dialog
+/** Website-report modes (All reports + every event tab) share one dialog
  *  layout — websites, per-format reports, per-page share — distinct from the
  *  accounts/portal directory layout. */
 function isReportMode(mode) {
@@ -350,7 +350,7 @@ export function groupInsightsByWebsite(rows) {
           .map(([format, v]) => ({ format, label: EVENT_FORMATS[format], folder: v.folder }))
           .sort((a, b) => a.label.localeCompare(b.label));
         const bare = mostRecent(g.variants.filter((v) => v.variant === ''));
-        if (bare) formats.unshift({ format: '', label: 'Insight report', folder: bare.folder });
+        if (bare) formats.unshift({ format: '', label: 'Digital Opportunity Report', folder: bare.folder });
         folder = formats[0].folder;
       } else {
         folder = mostRecent(g.variants).folder;
@@ -659,7 +659,7 @@ function renderDialog(content, company, websiteMap, domainMap, mode) {
         </div>
       </div>`;
     } else if (company.Folder) {
-      const ctaLabel = isReport ? 'Open insight report' : 'Open customer portal page';
+      const ctaLabel = isReport ? 'Open Digital Opportunity Report' : 'Open customer portal page';
       const editUrl = `https://da.live/canvas#/aemsites/summit-portal${folderToPath(company.Folder)}/index`;
       html += `<div class="cp-dialog-actions">
         <a class="cp-dialog-cta" href="${company.Folder}" target="_blank" rel="noopener">${ctaLabel} &rarr;</a>
@@ -670,7 +670,7 @@ function renderDialog(content, company, websiteMap, domainMap, mode) {
 
   content.innerHTML = html;
 
-  // Insight reports: share PER FORMAT. Each "Share" button toggles a share form
+  // Report modes: share PER FORMAT. Each "Share" button toggles a share form
   // bound to that format's specific page (lazily built on first open).
   if (isReport && company.formats && company.formats.length) {
     content.querySelectorAll('.cp-format').forEach((row) => {
@@ -870,7 +870,7 @@ export default async function init(el) {
 
   const portalCompanies = (await portalResp.json()).data || [];
   const insightRows = insightsResp.ok ? ((await insightsResp.json()).data || []) : [];
-  // Insight reports: one row per website×variant in the sheet → collapse to one
+  // All reports: one row per website×variant in the sheet → collapse to one
   // card per website, each carrying its available landing-page formats.
   const insightsCompanies = groupInsightsByWebsite(insightRows);
   // Which event tabs exist is authored in /data/event-tabs.json — no code change
