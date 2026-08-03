@@ -192,6 +192,45 @@ export function resolveTabParam(navModel, raw) {
   return findMode(navModel, id) ? id : DEFAULT_MODE;
 }
 
+/** Thousands separators, so "4035 total" reads as "4,035 total". */
+const fmtCount = (n) => Number(n || 0).toLocaleString('en-US');
+
+/**
+ * One line of orientation under the chip row: which slice am I looking at, how
+ * big is it, and — on an event — how do I get back to the full catalogue. The
+ * way back is offered ALWAYS, not just on an empty search: an event tab showing
+ * 405 of 4,035 reports is the single most confusing state in the picker.
+ * Returns null on Accounts (not this team's surface) and for a missing mode.
+ */
+export function contextCopy(mode, total) {
+  if (!mode || mode.id === 'accounts') return null;
+  if (mode.kind === 'all') {
+    return {
+      text: `Every Digital Opportunity Report we have generated — one card per website. ${fmtCount(total)} total.`,
+      action: null,
+    };
+  }
+  return {
+    text: `The ${fmtCount(total)} reports pinned for ${mode.label}.`,
+    action: 'Looking for someone else? Search all reports',
+  };
+}
+
+/**
+ * Copy for a search that matched nothing. Without this the grid just goes
+ * blank, so "no report for Acme at this event" is indistinguishable from "no
+ * report for Acme at all" — on an event tab the report is very often sitting in
+ * All reports, hence the action.
+ */
+export function emptyStateCopy(mode, query, allCount) {
+  const q = String(query || '').trim();
+  const isEvent = !!mode && mode.kind === 'event';
+  return {
+    text: isEvent ? `No match for “${q}” in ${mode.label}.` : `No match for “${q}”.`,
+    action: isEvent ? `Search all ${fmtCount(allCount)} reports` : null,
+  };
+}
+
 /**
  * Per-report data notices. A report's `Report Notice` cell (in insights-list)
  * holds one of these codes when a section was omitted because no data came back

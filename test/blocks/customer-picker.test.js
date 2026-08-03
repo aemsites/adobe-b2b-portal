@@ -10,6 +10,8 @@ import {
   findFamily,
   findMode,
   resolveTabParam,
+  contextCopy,
+  emptyStateCopy,
 } from '../../blocks/customer-picker/customer-picker.js';
 import { buildShareForm, buildShareSection, folderToDeepLink } from '../../blocks/customer-picker/share-form.js';
 
@@ -432,5 +434,57 @@ describe('customer-picker › resolveTabParam', () => {
     expect(resolveTabParam(model, '')).to.equal('insights');
     expect(resolveTabParam(model, null)).to.equal('insights');
     expect(resolveTabParam(model, undefined)).to.equal('insights');
+  });
+});
+
+const ALL_MODE = { id: 'insights', label: 'All reports', kind: 'all' };
+const EVENT_MODE = { id: 'munich', label: 'Munich Summit 2026', kind: 'event' };
+const ACCOUNTS_MODE = { id: 'accounts', label: 'Accounts', kind: 'all' };
+
+describe('customer-picker › contextCopy', () => {
+  it('describes All reports as everything we have generated, with a thousands-separated count', () => {
+    expect(contextCopy(ALL_MODE, 4035)).to.deep.equal({
+      text: 'Every Digital Opportunity Report we have generated — one card per website. 4,035 total.',
+      action: null,
+    });
+  });
+
+  it('describes an event as a pinned subset and always offers the way back to All reports', () => {
+    expect(contextCopy(EVENT_MODE, 405)).to.deep.equal({
+      text: 'The 405 reports pinned for Munich Summit 2026.',
+      action: 'Looking for someone else? Search all reports',
+    });
+  });
+
+  it('says nothing on the Accounts tab — another team owns that surface', () => {
+    expect(contextCopy(ACCOUNTS_MODE, 1844)).to.equal(null);
+  });
+
+  it('returns null for a missing mode', () => {
+    expect(contextCopy(null, 0)).to.equal(null);
+  });
+});
+
+describe('customer-picker › emptyStateCopy', () => {
+  it('offers the whole catalogue when an event search finds nothing', () => {
+    expect(emptyStateCopy(EVENT_MODE, 'acme', 4035)).to.deep.equal({
+      text: 'No match for “acme” in Munich Summit 2026.',
+      action: 'Search all 4,035 reports',
+    });
+  });
+
+  it('has no escape hatch on All reports — there is nowhere wider to go', () => {
+    expect(emptyStateCopy(ALL_MODE, 'acme', 4035)).to.deep.equal({
+      text: 'No match for “acme”.',
+      action: null,
+    });
+  });
+
+  it('has no escape hatch on Accounts', () => {
+    expect(emptyStateCopy(ACCOUNTS_MODE, 'acme', 4035).action).to.equal(null);
+  });
+
+  it('trims the echoed query', () => {
+    expect(emptyStateCopy(ALL_MODE, '  acme  ', 10).text).to.equal('No match for “acme”.');
   });
 });
