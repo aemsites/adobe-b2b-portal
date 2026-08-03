@@ -7,6 +7,7 @@ import {
   deriveEventModes,
   slugifyModeId,
 } from '../../blocks/customer-picker/customer-picker.js';
+import { buildShareForm, buildShareSection, folderToDeepLink } from '../../blocks/customer-picker/share-form.js';
 
 describe('customer-picker › parseInsightFolder', () => {
   it('treats the segment after /insights/ as the website slug', () => {
@@ -324,5 +325,26 @@ describe('customer-picker › deriveEventModes', () => {
   it('returns no modes for empty or absent rows', () => {
     expect(deriveEventModes([])).to.deep.equal([]);
     expect(deriveEventModes(undefined)).to.deep.equal([]);
+  });
+});
+
+describe('customer-picker › share-form', () => {
+  it('strips the origin but keeps the trailing slash', () => {
+    expect(folderToDeepLink('https://act.aem.now/customers/a/acme/')).to.equal('/customers/a/acme/');
+  });
+
+  it('passes a non-URL folder through untouched', () => {
+    expect(folderToDeepLink('/customers/a/acme/')).to.equal('/customers/a/acme/');
+  });
+
+  it('builds an email field, a send button and a copy button', () => {
+    const form = buildShareForm('/customers/a/acme/');
+    expect(form.querySelector('.cp-share-input')).to.exist;
+    expect(form.querySelector('.cp-share-send')).to.exist;
+    expect(form.querySelector('.cp-share-copy')).to.exist;
+  });
+
+  it('returns null when the company has no folder', () => {
+    expect(buildShareSection({ Company: 'Acme' })).to.equal(null);
   });
 });
