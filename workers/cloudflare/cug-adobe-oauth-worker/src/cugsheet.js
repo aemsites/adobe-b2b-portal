@@ -27,13 +27,24 @@
  */
 
 const SHEET_PATH = '/closed-user-groups.json';
+// Paths the sheet is allowed to decide for. Only the account namespace, which
+// DIH creates and maintains, is automated: a wrong or malicious row there can
+// at worst expose one customer's own report folder. Everything else the sheet
+// covers is an internal surface (`/adobe**` the staff dashboard, `/data/**`,
+// `/customers/**`, `/insights**`) and stays on the manually-applied Config
+// Service header, so opening one still takes a deliberate human step.
+const SHEET_SCOPE = '/accounts/';
 // How long a successfully-fetched sheet is reused inside one isolate. Short
 // enough that a newly published account goes live within minutes, long enough
-// that the sheet is fetched once per isolate rather than per request.
+// that the sheet is fetched once per isolate rather than per request. It is
+// also the floor on how fast a REVOCATION takes effect (plus the 300s edge
+// cache below, so ~10 min worst case).
 const TTL_MS = 5 * 60 * 1000;
-// Never let a slow origin hold up a page request — fall back to the header.
-const FETCH_TIMEOUT_MS = 2000;
-// Back-off after a failed refresh, so a broken origin isn't re-hit per request.
+// Total budget for a load, across every page — never let a slow origin hold up
+// a page request. Applies to the whole loop, not to each fetch in it.
+const LOAD_TIMEOUT_MS = 3000;
+// Back-off after a failed load, so a broken origin isn't re-hit per request.
+// Applies whether or not a stale copy survived (see loadEntries).
 const ERROR_RETRY_MS = 60 * 1000;
 // The sheet is served whole today (~4k rows). Page only if that ever changes.
 const PAGE_SIZE = 1000;
@@ -44,15 +55,17 @@ const log = (...args) => console.log('[cugsheet]', ...args);
 // eslint-disable-next-line no-console
 const logError = (...args) => console.error('[cugsheet]', ...args);
 
-// Per-isolate cache. `entries` is kept on refresh failure (stale-if-error): a
-// transient origin blip must not silently drop every customer back to the
-// staff-only header groups, which would 403 customers on their own pages.
-let cache = { entries: null, expires: 0 };
+// Per-isolate cache, keyed by origin so a redeploy against a different
+// ORIGIN_HOSTNAME can never answer from another site's access rules. `entries`
+// is kept on refresh failure (stale-if-error): a transient origin blip must not
+// silently drop every customer back to the staff-only header groups, which
+// would 403 customers on their own pages.
+let cache = { origin: null, entries: null, expires: 0 };
 let inFlight = null;
 
 /** Reset the module cache — tests only. */
 export function resetCugSheetCache() {
-  cache = { entries: null, expires: 0 };
+  cache = { origin: null, entries: null, expires: 0 };
   inFlight = null;
 }
 
@@ -100,11 +113,14 @@ async function fetchSheetRows(env) {
   const base = `https://${env.ORIGIN_HOSTNAME}${SHEET_PATH}`;
   const rows = [];
   let url = base;
+  // ONE signal for the whole loop. A per-fetch timeout would let a paginating
+  // origin stall a page request for MAX_PAGES × the timeout.
+  const signal = AbortSignal.timeout(LOAD_TIMEOUT_MS);
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const resp = await fetch(url, {
       headers,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal,
       cf: { cacheTtl: 300, cacheEverything: true },
     });
     if (!resp.ok) throw new Error(`sheet fetch failed (${resp.status})`);
@@ -121,23 +137,27 @@ async function fetchSheetRows(env) {
 
 /** Load the sheet, honouring the cache. Never throws; returns null on failure. */
 async function loadEntries(env) {
-  const now = Date.now();
-  if (cache.entries && now < cache.expires) return cache.entries;
+  const origin = env.ORIGIN_HOSTNAME;
+  // Note the check is on `expires` alone, not on `entries` — a FAILED load with
+  // nothing cached must also be honoured, or every request during an origin
+  // outage would re-attempt the fetch and pay the full load timeout.
+  if (cache.origin === origin && Date.now() < cache.expires) return cache.entries;
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
     try {
       const rows = await fetchSheetRows(env);
       const entries = parseCugSheetRows(rows);
-      cache = { entries, expires: Date.now() + TTL_MS };
+      cache = { origin, entries, expires: Date.now() + TTL_MS };
       log(`sheet loaded rows=${rows.length} entries=${entries.length}`);
       return entries;
     } catch (err) {
-      logError(`sheet fetch failed: ${err.message}`);
-      // Keep serving the last good copy rather than falling back to the
-      // (staff-only) header groups and locking customers out.
-      cache = { entries: cache.entries, expires: Date.now() + ERROR_RETRY_MS };
-      return cache.entries;
+      logError(`sheet load failed: ${err.message}`);
+      // Keep serving the last good copy for this origin rather than falling
+      // back to the (staff-only) header groups and locking customers out.
+      const stale = cache.origin === origin ? cache.entries : null;
+      cache = { origin, entries: stale, expires: Date.now() + ERROR_RETRY_MS };
+      return stale;
     } finally {
       inFlight = null;
     }
@@ -147,11 +167,13 @@ async function loadEntries(env) {
 }
 
 /**
- * The groups the sheet allows for `path`, or null when the sheet is
- * unavailable or names no groups for it (caller falls back to the header).
+ * The groups the sheet allows for `path`, or null when `path` is outside the
+ * automated scope, the sheet is unavailable, or it names no groups for it — in
+ * every one of those cases the caller falls back to the origin header.
  */
 export async function cugSheetGroups(path, env) {
   try {
+    if (!path || !path.startsWith(SHEET_SCOPE)) return null;
     const entries = await loadEntries(env);
     return matchSheetGroups(entries, path);
   } catch (err) {

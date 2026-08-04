@@ -81,6 +81,25 @@ describe('cugsheet', () => {
     });
   });
 
+  describe('scope', () => {
+    it('leaves internal surfaces to the manually-applied header', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(sheetResponse([
+        { url: '/adobe**', 'cug-groups': 'adobe.com, attacker.com' },
+        { url: '/data/**', 'cug-groups': 'adobe.com, attacker.com' },
+      ]));
+      vi.stubGlobal('fetch', fetchMock);
+
+      // A row naming these paths must not be able to open the staff dashboard
+      // or the data sheets without someone running the DA tool.
+      expect(await cugSheetGroups('/adobe/dashboard', env)).toBeNull();
+      expect(await cugSheetGroups('/data/insights-list.json', env)).toBeNull();
+      expect(await cugSheetGroups('/customers/acme/', env)).toBeNull();
+      expect(await cugSheetGroups('/', env)).toBeNull();
+      // …and the sheet is not even fetched for them.
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fetching', () => {
     it('fetches the sheet from the origin with the origin token', async () => {
       const fetchMock = vi.fn().mockResolvedValue(sheetResponse());
@@ -129,6 +148,68 @@ describe('cugsheet', () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 502 })));
 
       expect(await cugSheetGroups('/accounts/f/freshpet/', env)).toBeNull();
+    });
+
+    it('backs off after a failure instead of re-fetching on every request', async () => {
+      // With nothing cached to fall back on, an origin outage must not make
+      // every gated request pay the load timeout again.
+      const fetchMock = vi.fn().mockRejectedValue(new Error('origin down'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await cugSheetGroups('/accounts/f/freshpet/', env);
+      await cugSheetGroups('/accounts/f/freshpet/', env);
+      await cugSheetGroups('/accounts/z/other/', env);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-fetches once the back-off window has passed', async () => {
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new Error('origin down'))
+        .mockResolvedValue(sheetResponse());
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers();
+
+      try {
+        expect(await cugSheetGroups('/accounts/f/freshpet/', env)).toBeNull();
+        vi.advanceTimersByTime(61 * 1000);
+
+        expect(await cugSheetGroups('/accounts/f/freshpet/', env))
+          .toEqual(['adobe.com', 'semrush.com', 'freshpet.com']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not answer from another origin\'s cached sheet', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sheetResponse()));
+      await cugSheetGroups('/accounts/f/freshpet/', env);
+
+      // Same isolate, different origin: the cached rules must not carry over.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sheetResponse([])));
+      const otherEnv = createMockEnv({ ORIGIN_HOSTNAME: 'main--other--org.aem.live' });
+
+      expect(await cugSheetGroups('/accounts/f/freshpet/', otherEnv)).toBeNull();
+    });
+
+    it('bounds a paginating origin with one deadline for the whole load', async () => {
+      // A per-fetch timeout would let MAX_PAGES pages stall a page request for
+      // MAX_PAGES × the timeout, so every page must share one signal.
+      const page = (offset) => new Response(
+        JSON.stringify({ total: 3, limit: 1, offset, data: [ROWS[offset]] }),
+        { status: 200 },
+      );
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(page(0))
+        .mockResolvedValueOnce(page(1))
+        .mockResolvedValueOnce(page(2));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await cugSheetGroups('/accounts/f/freshpet/', env);
+
+      const signals = fetchMock.mock.calls.map(([, init]) => init.signal);
+      expect(signals).toHaveLength(3);
+      expect(new Set(signals).size).toBe(1);
     });
 
     it('returns null when the fetch throws', async () => {
