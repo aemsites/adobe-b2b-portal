@@ -21,32 +21,46 @@ import { handleShareLinkRequest } from '../src/sharelink.js';
 import { sendShareLinkConfirm, sendMagicLinkInternalNotify } from '../src/notification.js';
 import { createSession, createShareLinkToken } from '../src/session.js';
 import { createMockEnv } from './helpers.js';
+import { resetCugSheetCache } from '../src/cugsheet.js';
 
-function mockCugFetch(entries) {
-  return vi.fn().mockResolvedValueOnce(
-    new Response(JSON.stringify({ data: entries }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
-}
-
-/**
- * Mock the mapping fetch AND the live-CUG-header fetch that follows it, so
- * tests can control what the "real" page requires independently of what the
- * mapping sheet says — this is what lets the drift-correction tests exist.
- */
-function mockCugFetchWithLive(entries, { required = true, groups = [] } = {}) {
-  const mappingResp = new Response(JSON.stringify({ data: entries }), {
+function jsonResp(body) {
+  return new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+/** The closed-user-groups sheet response. Empty by default, so the mapping and
+ *  live-header paths below stay exercised exactly as they were. */
+function sheetResp(rows = []) {
+  return jsonResp({ total: rows.length, data: rows });
+}
+
+/**
+ * Mapping fetch, then the CUG sheet fetch that group resolution now makes.
+ * `sheet` rows (url + cug-groups) let a test say what the page is authored to
+ * allow; leaving it empty defers to the mapping as before.
+ */
+function mockCugFetch(entries, { sheet = [] } = {}) {
+  return vi.fn()
+    .mockResolvedValueOnce(jsonResp({ data: entries }))
+    .mockResolvedValueOnce(sheetResp(sheet))
+    // Anything after (the live-header HEAD) is deliberately uninformative.
+    .mockResolvedValue(new Response(null, { status: 200 }));
+}
+
+/**
+ * Mock the mapping fetch, the sheet fetch, AND the live-CUG-header fetch, so
+ * tests can control what the "real" page requires independently of what the
+ * mapping sheet says — this is what lets the drift-correction tests exist.
+ */
+function mockCugFetchWithLive(entries, { required = true, groups = [], sheet = [] } = {}) {
   const liveHeaders = { 'x-aem-cug-required': String(required) };
   if (groups.length) liveHeaders['x-aem-cug-groups'] = groups.join(', ');
-  const liveResp = new Response(null, { status: 200, headers: liveHeaders });
   return vi.fn()
-    .mockResolvedValueOnce(mappingResp)
-    .mockResolvedValueOnce(liveResp);
+    .mockResolvedValueOnce(jsonResp({ data: entries }))
+    .mockResolvedValueOnce(sheetResp(sheet))
+    .mockResolvedValueOnce(new Response(null, { status: 200, headers: liveHeaders }));
 }
 
 async function staffRequest(env, body, { groups = ['adobe.com'], email = 'staff@adobe.com' } = {}) {
@@ -67,6 +81,8 @@ describe('sharelink', () => {
     env = createMockEnv();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    // The sheet is cached per isolate — clear it so tests don't inherit rows.
+    resetCugSheetCache();
   });
 
   it('returns 405 for a non-POST request', async () => {
@@ -308,6 +324,44 @@ describe('sharelink', () => {
     const resp = await handleShareLinkRequest(req, env);
     expect(resp.status).toBe(200);
     // Live said hsbc.com — that's what gets baked in, not the mapping's hsbc.co.uk.
+    expect(createShareLinkToken).toHaveBeenCalledWith('share-link@hsbc.com', env, ['hsbc.com']);
+  });
+
+  it('grants the sheet group when the live header is stale (new account)', async () => {
+    // The account was published after the last "Apply Page Access" run, so the
+    // header still shows only the catch-all staff groups. Before the sheet was
+    // consulted this returned "Page has no customer group to share".
+    vi.stubGlobal('fetch', mockCugFetchWithLive(
+      [{ group: 'freshpet.com', url: '/accounts/f/freshpet/' }],
+      {
+        required: true,
+        groups: ['adobe.com', 'semrush.com'],
+        sheet: [
+          { url: '/accounts**', 'cug-groups': 'adobe.com, semrush.com' },
+          { url: '/accounts/f/freshpet**', 'cug-groups': 'adobe.com, semrush.com, freshpet.com' },
+        ],
+      },
+    ));
+    const req = await staffRequest(env, { mode: 'copy', path: '/accounts/f/freshpet/insights/freshpet-com/' });
+    const resp = await handleShareLinkRequest(req, env);
+
+    expect(resp.status).toBe(200);
+    expect(createShareLinkToken).toHaveBeenCalledWith('share-link@freshpet.com', env, ['freshpet.com']);
+  });
+
+  it('prefers the sheet over the live header when the two disagree', async () => {
+    vi.stubGlobal('fetch', mockCugFetchWithLive(
+      [{ group: 'hsbc.co.uk', url: '/accounts/h/hsbc-uk/*' }],
+      {
+        required: true,
+        groups: ['adobe.com', 'hsbc.co.uk'],
+        sheet: [{ url: '/accounts/h/hsbc-uk**', 'cug-groups': 'adobe.com, hsbc.com' }],
+      },
+    ));
+    const req = await staffRequest(env, { mode: 'copy', path: '/accounts/h/hsbc-uk/portal-landing' });
+    const resp = await handleShareLinkRequest(req, env);
+
+    expect(resp.status).toBe(200);
     expect(createShareLinkToken).toHaveBeenCalledWith('share-link@hsbc.com', env, ['hsbc.com']);
   });
 

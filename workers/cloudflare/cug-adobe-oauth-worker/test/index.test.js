@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import worker from '../src/index.js';
 import { createMockEnv, fakeJwt, signedJwt } from './helpers.js';
+import { resetCugSheetCache } from '../src/cugsheet.js';
 import { sendMagicLinkConfirm } from '../src/notification.js';
 
 vi.mock('../src/notification.js', () => ({
@@ -8,10 +9,25 @@ vi.mock('../src/notification.js', () => ({
   sendMagicLinkNotFound: vi.fn().mockResolvedValue(undefined),
 }));
 
-function mockOriginFetch(body = '<html>ok</html>', headers = {}, status = 200) {
-  return vi.fn().mockResolvedValue(
-    new Response(body, { status, headers: { 'Content-Type': 'text/html', ...headers } }),
-  );
+/**
+ * Origin double. Builds a FRESH Response per call (a shared one would have its
+ * body consumed by the first reader) and answers the closed-user-groups sheet
+ * request that CUG enforcement now makes with an empty sheet, so the origin
+ * headers stay in charge unless a test says otherwise.
+ */
+function mockOriginFetch(body = '<html>ok</html>', headers = {}, status = 200, sheet = []) {
+  return vi.fn().mockImplementation((input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/closed-user-groups.json')) {
+      return Promise.resolve(new Response(
+        JSON.stringify({ total: sheet.length, data: sheet }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ));
+    }
+    return Promise.resolve(
+      new Response(body, { status, headers: { 'Content-Type': 'text/html', ...headers } }),
+    );
+  });
 }
 
 describe('index (request routing)', () => {
@@ -21,6 +37,7 @@ describe('index (request routing)', () => {
     env = createMockEnv();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    resetCugSheetCache();
   });
 
   describe('port stripping', () => {

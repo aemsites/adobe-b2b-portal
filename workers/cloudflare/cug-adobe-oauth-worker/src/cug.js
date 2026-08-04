@@ -4,10 +4,17 @@
  * Reads x-aem-cug-required and x-aem-cug-groups headers from the origin
  * response and enforces authentication and email-domain-based authorization.
  *
- * Group matching uses the user's email domain (e.g., "adobe.com") against
- * the comma-separated domains in x-aem-cug-groups. Access is granted if the
- * user's domain matches at least one (OR logic).
+ * Group matching uses the user's email domain (e.g., "adobe.com") against the
+ * allowed domains for the path. Access is granted if the user's domain matches
+ * at least one (OR logic).
+ *
+ * WHETHER a path is gated comes from x-aem-cug-required. WHICH domains are
+ * allowed comes from the `closed-user-groups` sheet when it covers the path
+ * (see cugsheet.js — the header's group list goes stale between manual
+ * "Apply Page Access" runs), and from x-aem-cug-groups otherwise.
  */
+
+import { cugSheetGroups } from './cugsheet.js';
 
 // eslint-disable-next-line no-console
 const log = (...args) => console.log('[cug]', ...args);
@@ -15,9 +22,9 @@ const log = (...args) => console.log('[cug]', ...args);
 export async function checkCugAccess(originResponse, session, request, env) {
   const url = new URL(request.url);
   const cugRequired = originResponse.headers.get('x-aem-cug-required');
-  const cugGroups = originResponse.headers.get('x-aem-cug-groups');
+  const headerGroups = originResponse.headers.get('x-aem-cug-groups');
 
-  log(`path=${url.pathname} cug-required=${cugRequired} cug-groups=${cugGroups}`);
+  log(`path=${url.pathname} cug-required=${cugRequired} cug-groups=${headerGroups}`);
 
   // No CUG protection on this path — serve publicly
   if (cugRequired !== 'true') {
@@ -39,6 +46,16 @@ export async function checkCugAccess(originResponse, session, request, env) {
   }
 
   log(`path=${url.pathname} session email=***@${(session.email || '').split('@')[1]} groups=${JSON.stringify(session.groups)}`);
+
+  // Which domains may see this page. The sheet is authoritative when it covers
+  // the path — it is republished on every report, whereas the header's group
+  // list only changes when someone runs the DA "Apply Page Access" tool. Any
+  // sheet failure returns null and leaves the header in charge (fail closed).
+  const sheetGroups = await cugSheetGroups(url.pathname, env);
+  if (sheetGroups) {
+    log(`path=${url.pathname} groups from sheet=${sheetGroups.join(',')} (header said ${headerGroups || '(none)'})`);
+  }
+  const cugGroups = sheetGroups ? sheetGroups.join(',') : headerGroups;
 
   // If specific domains are required, check the user's email domain
   if (cugGroups) {
