@@ -6,6 +6,7 @@ import {
   templateForOrg,
 } from './magiclink.js';
 import { sendShareLinkConfirm, sendMagicLinkInternalNotify } from './notification.js';
+import { cugSheetGroups } from './cugsheet.js';
 
 // eslint-disable-next-line no-console
 const log = (...args) => console.log('[sharelink]', ...args);
@@ -143,20 +144,28 @@ export async function handleShareLinkRequest(request, env) {
     .map((e) => (e.group || '').trim().toLowerCase())
     .filter(Boolean);
 
-  // Cross-check against the page's REAL, live CUG groups rather than trusting
-  // the mapping sheet blindly — it can drift out of sync with what actually
-  // gates the page (see fetchLiveCugGroups doc). When the live check succeeds
-  // and the page is actually CUG-required, it wins; the mapping is only used
-  // as a fallback when the live check itself is unavailable, so a transient
-  // origin hiccup can't block minting outright.
-  const live = await fetchLiveCugGroups(path, env);
-  const domainsForGrant = (live && live.required && live.groups.length)
-    ? live.groups
-    : allowedDomains;
-  if (live && live.required && live.groups.length) {
-    log(`live CUG groups=${live.groups.join(',')} (mapping said ${allowedDomains.join(',') || '(none)'})`);
+  // Which domains the page really allows, best source first. The mapping sheet
+  // can drift from what actually gates the page (seen in production: mapping
+  // said `hsbc.co.uk`, the live group was `hsbc.com`), so it is the last resort.
+  //
+  //   1. the `closed-user-groups` SHEET — what the page is authored to allow,
+  //      republished on every report, so a new account is never missing
+  //   2. the live `x-aem-cug-groups` HEADER — the same data as (1), but only as
+  //      fresh as the last manual "Apply Page Access" run
+  //   3. the mapping sheet — only when neither of the above is available
+  //
+  // A grant must match what `checkCugAccess` will enforce when the link is
+  // redeemed; both now read the sheet first, so the two stay in step.
+  const sheetGroups = await cugSheetGroups(path, env);
+  const live = sheetGroups ? null : await fetchLiveCugGroups(path, env);
+  const liveGroups = (live && live.required && live.groups.length) ? live.groups : null;
+  const domainsForGrant = sheetGroups || liveGroups || allowedDomains;
+  if (sheetGroups) {
+    log(`CUG groups from sheet=${sheetGroups.join(',')} (mapping said ${allowedDomains.join(',') || '(none)'})`);
+  } else if (liveGroups) {
+    log(`CUG groups from live header=${liveGroups.join(',')} (mapping said ${allowedDomains.join(',') || '(none)'})`);
   } else {
-    log('live CUG check unavailable or inconclusive — falling back to mapping data');
+    log('sheet and live CUG check unavailable or inconclusive — falling back to mapping data');
   }
 
   let grantGroups;

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import {
+  describe, it, expect, vi, beforeEach,
+} from 'vitest';
 import { checkCugAccess } from '../src/cug.js';
+import { resetCugSheetCache } from '../src/cugsheet.js';
 import { createMockEnv } from './helpers.js';
 
 function originResponse(headers = {}) {
@@ -9,9 +12,26 @@ function originResponse(headers = {}) {
   });
 }
 
+/** Stub the closed-user-groups sheet fetch that group resolution makes. */
+function stubSheet(rows = []) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ total: rows.length, data: rows }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  ));
+}
+
 describe('cug', () => {
   const env = createMockEnv();
   const request = new Request('https://mysite.com/members/page');
+
+  beforeEach(() => {
+    resetCugSheetCache();
+    vi.unstubAllGlobals();
+    // Default: the sheet covers nothing, so the origin headers decide.
+    stubSheet();
+  });
 
   describe('no CUG protection', () => {
     it('passes through when x-aem-cug-required is absent', async () => {
@@ -150,6 +170,70 @@ describe('cug', () => {
       );
 
       expect(resp.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+  });
+
+  // The origin's group header is only as fresh as the last manual "Apply Page
+  // Access" run, so a newly published account looks staff-only at the edge and
+  // its own customer 403s. The sheet is republished with every report, so it
+  // wins whenever it covers the path.
+  describe('group source: sheet over header', () => {
+    const accountRequest = new Request('https://mysite.com/accounts/f/freshpet/insights/x/');
+    const staleHeaders = {
+      'x-aem-cug-required': 'true',
+      'x-aem-cug-groups': 'adobe.com, semrush.com',
+    };
+
+    it('grants the customer when the sheet allows their domain but the header does not', async () => {
+      stubSheet([
+        { url: '/accounts**', 'cug-groups': 'adobe.com, semrush.com' },
+        { url: '/accounts/f/freshpet**', 'cug-groups': 'adobe.com, semrush.com, freshpet.com' },
+      ]);
+      const session = { email: 'buyer@freshpet.com', groups: ['freshpet.com'] };
+
+      const resp = await checkCugAccess(originResponse(staleHeaders), session, accountRequest, env);
+
+      expect(resp.status).toBe(200);
+    });
+
+    it('still denies a domain neither the sheet nor the header allows', async () => {
+      stubSheet([
+        { url: '/accounts/f/freshpet**', 'cug-groups': 'adobe.com, semrush.com, freshpet.com' },
+      ]);
+      const session = { email: 'eve@evil.com', groups: ['evil.com'] };
+
+      const resp = await checkCugAccess(originResponse(staleHeaders), session, accountRequest, env);
+
+      expect(resp.status).toBe(302);
+      expect(resp.headers.get('Location')).toBe('https://mysite.com/403');
+    });
+
+    it('narrows to the sheet when the sheet is stricter than the header', async () => {
+      stubSheet([{ url: '/accounts/f/freshpet**', 'cug-groups': 'freshpet.com' }]);
+      const session = { email: 'rachel@semrush.com', groups: ['semrush.com'] };
+
+      const resp = await checkCugAccess(originResponse(staleHeaders), session, accountRequest, env);
+
+      expect(resp.status).toBe(302);
+      expect(resp.headers.get('Location')).toBe('https://mysite.com/403');
+    });
+
+    it('falls back to the header when the sheet is unavailable', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('origin down')));
+      const session = { email: 'alice@adobe.com', groups: ['adobe.com'] };
+
+      const resp = await checkCugAccess(originResponse(staleHeaders), session, accountRequest, env);
+
+      expect(resp.status).toBe(200);
+    });
+
+    it('never gates a page the origin says is public, whatever the sheet says', async () => {
+      stubSheet([{ url: '/accounts**', 'cug-groups': 'adobe.com' }]);
+
+      const resp = await checkCugAccess(originResponse(), null, accountRequest, env);
+
+      expect(resp.status).toBe(200);
+      expect(global.fetch).not.toHaveBeenCalled();
     });
   });
 });
