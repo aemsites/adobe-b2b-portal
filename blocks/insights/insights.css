@@ -1,0 +1,79 @@
+.insights {
+  --ins-ink: #141317;
+  --ins-amber: #e58a00;
+  --ins-green: #8ff0b6;
+  --ins-red: #ff8a6b;
+
+  .ins-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .ins-card {
+    background: var(--ins-ink);
+    color: #fff;
+    border-radius: 14px;
+    padding: 26px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .ins-card.warn {
+    background: linear-gradient(160deg, #2a1408, #141317);
+    border: 1px solid #4a2a12;
+  }
+
+  .ins-flag {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ins-amber);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ins-card.trend .ins-flag {
+    color: var(--ins-green);
+  }
+
+  .ins-card.benchmark .ins-flag {
+    color: #c9c9cf;
+  }
+
+  .ins-num {
+    font-size: 46px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .ins-sub {
+    font-size: 14px;
+    color: #a9a9b2;
+    margin-bottom: 16px;
+  }
+
+  .ins-body {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #cfcfd6;
+    margin: 0;
+  }
+
+  .ins-body b,
+  .ins-body strong {
+    color: var(--ins-red);
+    font-weight: 700;
+  }
+}
+
+@media (width >= 1000px) {
+  .insights .ins-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

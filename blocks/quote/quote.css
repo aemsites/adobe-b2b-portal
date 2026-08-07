@@ -1,0 +1,76 @@
+.quote {
+  --q-red: var(--rpt-red, var(--color-adobe-red, #e60000));
+
+  .q-banner {
+    background: var(--q-red);
+    color: #fff;
+    border-radius: 22px;
+    padding: 64px 60px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .q-banner::before {
+    content: "\201c";
+    position: absolute;
+    top: -20px;
+    left: 40px;
+    font-size: 200px;
+    opacity: 0.16;
+    font-family: Georgia, serif;
+  }
+
+  .q-text {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.32;
+    max-width: 24ch;
+    margin: 0 auto 26px;
+    letter-spacing: -0.01em;
+    position: relative;
+  }
+
+  .q-author {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+
+  .q-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 22%);
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    color: #fff;
+  }
+
+  .q-name {
+    text-align: left;
+    font-size: 15px;
+  }
+
+  .q-name b {
+    display: block;
+    font-weight: 700;
+  }
+
+  .q-name span {
+    opacity: 0.85;
+    font-size: 13px;
+  }
+}
+
+@media (width < 1000px) {
+  .quote .q-banner {
+    padding: 40px 28px;
+  }
+
+  .quote .q-text {
+    font-size: 24px;
+  }
+}
