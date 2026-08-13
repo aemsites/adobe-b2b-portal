@@ -1,8 +1,9 @@
 /*
  * Co-branded Logos Block
- * A horizontal logo lockup — Adobe × one-or-more partner / customer brands,
- * separated by "×" dividers. The Adobe mark (bundled SVG) is prepended
- * automatically unless the block carries the `no-adobe` variant.
+ * A horizontal logo lockup — Adobe + one-or-more partner / customer brands.
+ * The Adobe mark (bundled SVG) is prepended automatically unless the block
+ * carries the `no-adobe` variant. An optional trailing caption (e.g.
+ * "Adobe × Amazon — confidential") renders after a pipe divider.
  *
  * Authoring — one row per partner brand (rendered left→right after Adobe):
  *   logo | name | link | color
@@ -10,11 +11,12 @@
  *            for a fallback tile (e.g. "M").
  *   - name:  brand name — used as the image alt / tile aria-label.
  *   - link:  optional URL; wraps that brand's mark in a link.
- *   - color: optional hex; tints the fallback initials tile only (ignored
- *            when a real logo image is authored).
+ *   - color: optional hex; tints the fallback initials tile only.
+ * Optional last row — a single cell of prose — becomes the caption.
  *
- * Variants: `center` (center the lockup, e.g. in a footer), `no-adobe`
- * (do not auto-prepend the Adobe mark — author every brand yourself).
+ * Variants: `center` (center the lockup), `no-adobe` (don't auto-prepend Adobe),
+ * `dark` (light logos/text on a dark bar, e.g. a footer), `plain` (space the
+ * logos instead of separating them with "×" dividers).
  */
 const ADOBE_LOGO = '/img/icons/adobe-logo.svg';
 
@@ -76,8 +78,23 @@ function makeBrand(cells) {
   return wrap(mark, link);
 }
 
+/** A trailing single-cell row of prose (has whitespace, no image) is the caption. */
+export function takeCaption(rows) {
+  const last = rows[rows.length - 1];
+  if (!last) return '';
+  const cells = [...last.children];
+  const text = last.textContent.trim();
+  if (cells.length === 1 && !last.querySelector('img, picture') && /\s/.test(text)) {
+    rows.pop();
+    return text;
+  }
+  return '';
+}
+
 export default function init(el) {
   const rows = [...el.querySelectorAll(':scope > div')];
+  const caption = takeCaption(rows);
+
   const row = document.createElement('div');
   row.className = 'cbl-row';
 
@@ -91,10 +108,21 @@ export default function init(el) {
     marks.push(makeBrand(cells));
   });
 
+  const plain = el.classList.contains('plain');
   marks.forEach((m, i) => {
-    if (i > 0) row.append(makeDivider());
+    if (i > 0 && !plain) row.append(makeDivider());
     row.append(m);
   });
+
+  if (caption) {
+    const pipe = document.createElement('span');
+    pipe.className = 'cbl-pipe';
+    pipe.setAttribute('aria-hidden', 'true');
+    const note = document.createElement('span');
+    note.className = 'cbl-note';
+    note.textContent = caption;
+    row.append(pipe, note);
+  }
 
   el.textContent = '';
   el.append(row);

@@ -1,12 +1,43 @@
 /*
  * Insights (blindspots) Block
- * Dark stat/insight cards: category flag + big number + sub-label + body.
+ * Light stat/insight cards: tone-driven pill badge (icon + label) + big number
+ * with a sized unit + bold sub-label + body + optional source link.
  * Authoring — one row per card:
- *   flag | bignum | sub | body | tone (optional: warn | trend | benchmark)
- * The body cell keeps inline emphasis (authored <strong>/<b> renders as the
- * accent "delta" colour).
+ *   flag | bignum | sub | body | tone | source
+ * - flag:   badge label (e.g. "Blindspot" / "Trend" / "Benchmark")
+ * - tone:   warn | trend | benchmark — drives the badge colour and its icon.
+ * - bignum: the number is shown large; trailing/interior units and connector
+ *           words ("%", "s", " of ") render smaller automatically.
+ * - body:   keeps inline emphasis — authored <strong>/<b> renders in the accent
+ *           "delta" colour; a sole wrapping <p> is unwrapped.
+ * - source: optional; rendered as a "Source: <link>" footnote.
  */
 const TONES = ['warn', 'trend', 'benchmark'];
+
+/** Unwrap a sole wrapping <p> so we never nest <p> inside <p>. */
+function innerOf(cell) {
+  return cell.children.length === 1 && cell.firstElementChild?.tagName === 'P'
+    ? cell.firstElementChild.innerHTML
+    : cell.innerHTML;
+}
+
+/** Big number with smaller units: split off runs that carry no digits. */
+export function renderNumber(str) {
+  const num = document.createElement('div');
+  num.className = 'ins-num';
+  str.split(/([^\d.+-]+)/).forEach((part) => {
+    if (!part) return;
+    if (/[^\d.+-]/.test(part)) {
+      const unit = document.createElement('span');
+      unit.className = 'ins-num-unit';
+      unit.textContent = part;
+      num.append(unit);
+    } else {
+      num.append(document.createTextNode(part));
+    }
+  });
+  return num;
+}
 
 export default function init(el) {
   const rows = [...el.querySelectorAll(':scope > div')];
@@ -21,6 +52,7 @@ export default function init(el) {
     const sub = cells[2]?.textContent.trim() || '';
     const bodyCell = cells[3];
     const tone = (cells[4]?.textContent.trim() || '').toLowerCase();
+    const sourceCell = cells[5];
 
     if (!num && !flag) return;
 
@@ -28,29 +60,45 @@ export default function init(el) {
     const card = document.createElement('div');
     card.className = `ins-card${toneClass}`;
 
-    const f = document.createElement('div');
-    f.className = 'ins-flag';
-    f.textContent = flag;
+    const head = document.createElement('div');
+    head.className = 'ins-head';
 
-    const n = document.createElement('div');
-    n.className = 'ins-num';
-    n.textContent = num;
+    if (flag) {
+      const badge = document.createElement('span');
+      badge.className = 'ins-badge';
+      const icon = document.createElement('span');
+      icon.className = 'ins-badge-icon';
+      const label = document.createElement('span');
+      label.textContent = flag;
+      badge.append(icon, label);
+      head.append(badge);
+    }
 
-    const s = document.createElement('div');
-    s.className = 'ins-sub';
-    s.textContent = sub;
-
-    card.append(f, n, s);
+    const numsub = document.createElement('div');
+    numsub.className = 'ins-numsub';
+    if (num) numsub.append(renderNumber(num));
+    if (sub) {
+      const s = document.createElement('div');
+      s.className = 'ins-sub';
+      s.textContent = sub;
+      numsub.append(s);
+    }
+    head.append(numsub);
+    card.append(head);
 
     if (bodyCell && bodyCell.textContent.trim()) {
       const b = document.createElement('p');
       b.className = 'ins-body';
-      // Unwrap a sole authored <p> so we don't nest <p> inside <p>.
-      b.innerHTML = bodyCell.children.length === 1
-        && bodyCell.firstElementChild?.tagName === 'P'
-        ? bodyCell.firstElementChild.innerHTML
-        : bodyCell.innerHTML;
+      b.innerHTML = innerOf(bodyCell);
       card.append(b);
+    }
+
+    if (sourceCell && sourceCell.textContent.trim()) {
+      const src = document.createElement('p');
+      src.className = 'ins-source';
+      const inner = innerOf(sourceCell);
+      src.innerHTML = /^\s*source\s*:/i.test(sourceCell.textContent) ? inner : `Source: ${inner}`;
+      card.append(src);
     }
 
     grid.append(card);
