@@ -11,7 +11,7 @@ function isCugHeader(key) {
 }
 
 async function fetchCugSheet(org, site, token) {
-  const url = `${DA_SOURCE_BASE}/${org}/${site}/${CUG_SHEET_PATH}`;
+  const url = `${DA_SOURCE_BASE}/${org}/${site}/${CUG_SHEET_PATH}?nocache=${Date.now()}`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
