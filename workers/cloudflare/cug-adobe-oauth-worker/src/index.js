@@ -177,7 +177,7 @@ const handleRequest = async (request, env) => {
 
   // Logout: clear session cookie and redirect to IMS logout
   if (url.pathname === '/auth/logout') {
-    const imsLogoutUrl = `${env.OAUTH_LOGOUT_URL}?client_id=${env.OAUTH_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/')}`;
+    const imsLogoutUrl = `${env.OAUTH_LOGOUT_URL}?client_id=${env.OAUTH_CLIENT_ID}&redirect_uri=${encodeURIComponent(`${url.origin}/auth/callback`)}`;
     const headers = new Headers({ Location: imsLogoutUrl });
     headers.append('Set-Cookie', clearSessionCookie());
     headers.append('Set-Cookie', clearSignedInMarkerCookie());

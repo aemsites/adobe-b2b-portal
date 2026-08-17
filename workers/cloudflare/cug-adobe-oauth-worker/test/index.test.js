@@ -197,6 +197,9 @@ describe('index (request routing)', () => {
       const location = resp.headers.get('Location');
       expect(location).toContain('ims.example.com/ims/logout/v1');
       expect(location).toContain('client_id=test-client-id');
+      // Must match a registered OAuth redirect URI exactly (IMS falls back to
+      // the client's default redirect otherwise, not the requesting site's).
+      expect(location).toContain(`redirect_uri=${encodeURIComponent('https://mysite.com/auth/callback')}`);
       expect(resp.headers.get('Set-Cookie')).toContain('Max-Age=0');
     });
 

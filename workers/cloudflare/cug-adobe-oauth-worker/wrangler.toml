@@ -18,16 +18,16 @@ OAUTH_CLIENT_ID = "aem-sites-cug"
 ENVIRONMENT = "prod"
 # Bump to revoke all generic event staff-login sessions at once (kill switch).
 EVENT_CRED_EPOCH = "1"
+APO_CLIENT_ID = "expdev-xwalk-trial"
+APO_SCOPE = "APO.(expdev_.+),APO_SMS.(expdev_.+)"
 
 # Secrets (set via: wrangler secret put <NAME> --env b2b)
 # OAUTH_CLIENT_SECRET = "..."  (same value already used for the summit/default envs — client aem-sites-cug is shared, with multiple registered redirect URIs)
 # JWT_SECRET = "..."  (generate a fresh, unique value for this env — do NOT reuse another env's secret)
 # EVENT_STAFF_CREDENTIALS = "..."  (newline/comma list of username:sha256hex(password) for on-site iPad logins)
 # ORIGIN_AUTHENTICATION = "..."  (site token for the protected origin — required while the b2b origin returns 401 access-not-allowed)
-# APO_CLIENT_ID = "..."
 # APO_CLIENT_SECRET = "..."
-# APO_SCOPE = "..."
-# APO_AUTHORIZATION_CODE = "..."  (optional — enables authorization_code IMS grant)
+# APO_AUTHORIZATION_CODE = "..."  (optional — enables authorization_code IMS grant; treat as sensitive, it's redeemable for a token)
 
 [[env.b2b.kv_namespaces]]
 binding = "SESSIONS"
