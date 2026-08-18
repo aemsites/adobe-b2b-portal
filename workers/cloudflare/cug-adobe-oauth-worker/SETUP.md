@@ -74,7 +74,18 @@ remove the others, they belong to other sites sharing this client. Skipping
 this step means login fails at the IMS screen with `redirect_uri_mismatch`,
 and sign-out silently lands on whichever site's callback IMS falls back to.
 
-### 2.4 Set the secrets
+### 2.4 Deploy
+
+```bash
+npx wrangler deploy --env b2b
+```
+
+This publishes to a `*.workers.dev` URL (e.g.
+`https://b2b-portal.franklin-prod.workers.dev`) immediately, ahead of the
+secrets and custom domain below. The worker is live at that URL but auth/email
+calls will fail until the secrets in the next step are set.
+
+### 2.5 Set the secrets
 
 ```bash
 # Session-signing key — generate fresh per env, never reuse another site's.
@@ -100,19 +111,9 @@ Store a retrievable copy of each secret in a shared password vault
  before or right after setting it — Cloudflare secrets can be
 overwritten but never read back.
 
-### 2.5 Deploy
-
-```bash
-npx wrangler deploy --env b2b
-```
-
-This publishes to a `*.workers.dev` URL (e.g.
-`https://b2b-portal.franklin-prod.workers.dev`) immediately, ahead of the
-custom domain below.
-
 ### 2.6 Bind the domain
 
-Cloudflare dashboard → Workers & Pages → **b2b-portal** → Settings →
+Cloudflare dashboard (dash.cloudflare.com) → Workers & Pages → **b2b-portal** → Settings →
 Domains & Routes → **Custom Domain** → `b2b.aem.now/*`. This provisions the
 DNS record automatically; no manual CNAME needed.
 
