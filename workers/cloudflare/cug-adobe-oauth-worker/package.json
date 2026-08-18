@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --env summit",
+    "deploy": "wrangler deploy --env b2b",
     "test": "vitest run",
     "test:watch": "vitest"
   },

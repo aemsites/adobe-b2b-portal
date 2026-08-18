@@ -46,6 +46,7 @@ ENVIRONMENT = "prod"
 EVENT_CRED_EPOCH = "1"
 APO_CLIENT_ID = "expdev-xwalk-trial"
 APO_SCOPE = "APO.(expdev_.+),APO_SMS.(expdev_.+)"
+# PUSH_INVALIDATION = "disabled"   # optional — omit to leave push invalidation enabled (the default)
 
 [[env.b2b.kv_namespaces]]
 binding = "SESSIONS"
@@ -116,6 +117,25 @@ overwritten but never read back.
 Cloudflare dashboard (dash.cloudflare.com) → Workers & Pages → **b2b-portal** → Settings →
 Domains & Routes → **Custom Domain** → `b2b.aem.now/*`. This provisions the
 DNS record automatically; no manual CNAME needed.
+
+### 2.7 Verify
+
+```bash
+# Public page — should return 200
+curl -sI "https://b2b.aem.now/"
+
+# Drafts — should return 404
+curl -sI "https://b2b.aem.now/drafts/test"
+
+# No session — should return 401 / {"authenticated":false}
+curl -s "https://b2b.aem.now/auth/me"
+```
+
+Then in a browser: open a CUG-protected page, confirm it redirects to Adobe
+IMS login, confirm it lands back on the same page with an `auth_token` cookie
+set after signing in, and confirm `/auth/logout` clears the cookie and redirects
+to IMS logout (not to another site's domain — see `src/index.js`'s logout
+handler if it does).
 
 ## 3. CDN / Cloudflare zone setup
 
