@@ -65,7 +65,7 @@ export async function handleShareLinkRequest(request, env) {
 
   // --- Gate 1: authenticated staff (session cookie OR a validated IMS token) ---
   // The Experience Workspace plugin runs cross-origin and can't send the
-  // act.aem.now cookie, so it authorizes with the DA IMS token it already holds
+  // b2b.aem.now cookie, so it authorizes with the DA IMS token it already holds
   // (validated against IMS in validateImsStaffToken).
   const session = await getSession(request, env);
   let callerEmail = session?.email || null;

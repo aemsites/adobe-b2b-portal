@@ -3,7 +3,7 @@ import qrcodegen from './qrcode.mjs';
 
 const DA_SOURCE_BASE = 'https://admin.da.live/source';
 const CUG_SHEET_PATH = 'closed-user-groups.json';
-const DEFAULT_MAGICLINK_ORIGIN = 'https://act.aem.now';
+const DEFAULT_MAGICLINK_ORIGIN = 'https://b2b.aem.now';
 
 // ─── CUG scope classification (authoritative read from the DA sheet) ─────────
 
@@ -72,7 +72,7 @@ async function mintMagicLink({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // EW has the DA IMS token, not the act.aem.now cookie — authorize with it.
+        // EW has the DA IMS token, not the b2b.aem.now cookie — authorize with it.
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(body),

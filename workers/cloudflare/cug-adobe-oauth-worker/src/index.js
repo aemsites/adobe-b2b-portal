@@ -139,7 +139,7 @@ const handleRequest = async (request, env) => {
   // longer-lived deep link for a specific page to a customer.
   if (url.pathname === '/auth/sharelink') {
     // The Experience Workspace plugin calls this cross-origin (an *.aem.live tool
-    // page → act.aem.now), so answer the CORS preflight and echo CORS headers.
+    // page → b2b.aem.now), so answer the CORS preflight and echo CORS headers.
     // Bearer auth is used (not the cookie), so no Allow-Credentials is needed.
     const origin = request.headers.get('Origin') || '';
     const corsOk = /^https:\/\/([a-z0-9-]+\.)*aem\.live$/.test(origin) || origin === 'https://da.live';

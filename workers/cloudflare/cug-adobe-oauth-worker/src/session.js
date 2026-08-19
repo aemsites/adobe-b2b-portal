@@ -84,7 +84,7 @@ export function isStaffEmail(email, env) {
 /**
  * Validate an IMS access token against IMS and return the caller's email
  * (lowercased), or null. Used by the share-link endpoint so the Experience
- * Workspace plugin — which holds a DA IMS token but not the act.aem.now session
+ * Workspace plugin — which holds a DA IMS token but not the b2b.aem.now session
  * cookie (different origin) — can authorize a mint. The token is verified with
  * IMS, not merely decoded.
  */
